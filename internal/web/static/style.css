@@ -136,3 +136,37 @@ code { font-family: var(--mono); font-size: 0.92em; }
   main { padding: 0; max-width: none; }
   .cert { border: 2px solid #000; border-top-width: 10px; margin-top: 15vh; }
 }
+
+/* ---- consoles (signed-in pages) ---- */
+main.console, .foot.console { max-width: 1000px; }
+.top:has(.usernav) { max-width: 1000px; flex-wrap: wrap; }
+.usernav { margin-left: auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; font-size: 14px; }
+.usernav a { color: var(--ink); text-decoration: none; }
+.usernav a:hover { text-decoration: underline; }
+.usernav form { display: inline; }
+.panel h2 { margin-bottom: 12px; }
+.panel h3 { margin: 20px 0 8px; font-size: 16px; }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 12px; }
+.table th, .table td { text-align: left; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.table th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.table-compact td { padding: 5px 10px 5px 0; }
+.panel { overflow-x: auto; }
+.inline-fields { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 8px; }
+.inline-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.inline-fields input {
+  min-height: 40px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--rule);
+  background: var(--surface); color: var(--ink); font: 15px var(--sans); min-width: 0;
+}
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 20px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.cards { list-style: none; padding: 0; display: grid; gap: 10px; }
+.cards a { display: block; padding: 14px 16px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; text-decoration: none; color: var(--ink); }
+.cards a:hover { border-color: var(--accent); }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bad-bg); color: var(--bad-ink); }
+.steps { padding-left: 20px; }
+.steps li { margin-bottom: 12px; }
+.secret code { font-size: 18px; letter-spacing: 0.05em; overflow-wrap: anywhere; }
+.counts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 8px; }
+.counts .bad { color: var(--bad-ink); }
+.table td.err { color: var(--muted); font-size: 13px; max-width: 320px; overflow-wrap: anywhere; }

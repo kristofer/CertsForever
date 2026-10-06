@@ -28,14 +28,31 @@ supersedes it.
 | Ops | none | Litestream backups, Caddy TLS, monitoring, runbook |
 | Accountability | none | audit log of every admin action |
 
-The scaffold has no production data yet, so **rewrite `001_init.sql` as the
-multi-tenant schema** instead of writing an `ALTER TABLE` migration. SQLite
+*Update (Milestone 1):* the plan was to rewrite `001_init.sql`. Instead,
+Milestone 0 made applied migrations tamper-evident, so the multi-tenant
+schema shipped as **`002_multitenant.sql`**. It rebuilds each table and
+moves existing data into a `zcw` client, so databases from the scaffold upgrade
+in place. The original reasoning follows: rewriting 001 instead of writing
+an `ALTER TABLE` migration. SQLite
 can't add `NOT NULL` foreign-key columns without rebuilding the table, and
 nothing needs preserving yet. Forward-only migrations start from there.
 
 ---
 
 ## 2. Roles and permissions
+
+> **As built in Milestone 2:**
+> - **Invitations:** they aren't a separate table. An invite adds the
+>   membership and emails a 7-day single-use link (`login_tokens.purpose = 'invite'`).
+> - **Acting as a client:** this isn't a separate mode. A super admin can open
+>   any client's console, the page shows a banner, and their actions are
+>   audited with `impersonated = 1`.
+> - **TOTP setup:** it shows the setup key and an `otpauth://` link. A QR code
+>   can come later.
+> - **Email delivery:** email goes straight to SMTP for now. Milestone 3
+>   puts a durable outbox in front of it.
+> - **Admin token:** `CERTS_ADMIN_TOKEN` remains for automation, audited as
+>   `admin-token`.
 
 There are two levels, as requested. Internally they're represented so that a
 third role (for example, an "issuer" who can issue but not change settings)
@@ -273,6 +290,21 @@ completion. It replaces the scaffold's `/admin/api/*`.
 
 ## 6. Email
 
+> **As built in Milestone 3:**
+> - **Encrypted queue:** queued bodies are encrypted with the master key (bound
+>   to the recipient) and wiped on delivery, because they carry sign-in and
+>   claim links.
+> - **Atomic issuing:** certificates and their emails are committed in the
+>   same transaction.
+> - **Rejection handling:** only RCPT-stage 5xx replies suppress an address,
+>   so a credential error can't suppress real students.
+> - **Reminders:** a reminder carries a fresh claim link. Only hashes of claim
+>   tokens are stored, so the original can't be re-sent.
+> - **Retry schedule:** retries run 1, 2, 4 … 64 minutes, up to 8 attempts.
+> - **Webhook formats:** the bounce webhook accepts Postmark's format and a
+>   generic one.
+> - **Delivery:** at-least-once.
+
 - **Queue and worker:** `email_outbox` with a background worker goroutine.
   Retries use exponential backoff (1 min to 6 h, up to 8 attempts), then the
   message is marked `failed` and shown on `/super/system`.
@@ -339,9 +371,9 @@ Effort estimates are for focused build time and are rough.
 | # | Milestone | Done when | Est. |
 |---|---|---|---|
 | **0** ✅ | **Foundations** (done 2026-10-06; Docker packaging added) | Driver decision; read/write pools; pragmas; migration runner with pre-migration snapshot; config validation; CI (vet, staticcheck, govulncheck, tests); `docs/RUNBOOK.md` started | 2–3 d |
-| **1** | **Multi-tenant schema** | New `001_init.sql` with `clients` and composite FKs; `Scope`-required store API; per-client ID prefixes; tenant-isolation test suite passes | 3–4 d |
-| **2** | **Accounts and roles** | Users, magic-link login, sessions, CSRF, TOTP for super admins, invitations, `authz.Can`, audit log, rate limits, `superadmin add` CLI | 4–5 d |
-| **3** | **Email** | Outbox, worker, SMTP provider, four templates, bounce webhook, dev mode that logs emails instead of sending | 2 d |
+| **1** ✅ | **Multi-tenant schema** (done 2026-10-06, as migration 002 rather than a rewritten 001; see §3) | Migration `002_multitenant.sql` with `clients` and composite FKs; `Scope`-required store API; per-client ID prefixes; tenant-isolation test suite passes | 3–4 d |
+| **2** ✅ | **Accounts and roles** (done 2026-10-06; see the note in §2) | Users, magic-link login, sessions, CSRF, TOTP for super admins, invitations, `authz.Can`, audit log, rate limits, `superadmin add` CLI | 4–5 d |
+| **3** ✅ | **Email** (done 2026-10-06; see the note in §6) | Outbox, worker, SMTP provider, four templates, bounce webhook, dev mode that logs emails instead of sending | 2 d |
 | **4** | **Client console** | Courses, designs with live preview, CSV dry-run issue, cohort roster, certificate detail (revoke, reissue, resend), team, settings, stats, export, API tokens | 7–10 d |
 | **5** | **Super console** | Client CRUD, suspend, domains, first-admin invite, act-as with banner and audit, users, global audit, system page | 3–4 d |
 | **6** | **Per-client public experience** | Branded certificate page and share image driven by `design_snapshot`; host-based routing; canonical redirects; Caddy `ask` endpoint | 3–4 d |

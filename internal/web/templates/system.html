@@ -1,0 +1,75 @@
+{{define "title"}}System · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Platform administration</p>
+<h1 class="page-title">System</h1>
+{{with .Notice}}<div class="status status-ok" role="status">{{.}}</div>{{end}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+
+<section class="panel">
+  <dl class="kv">
+    <dt>Version</dt><dd>{{.Version}}</dd>
+    <dt>Schema</dt><dd>{{.Schema}}</dd>
+    <dt>Email</dt><dd>{{.EmailMode}}</dd>
+    <dt>Bounce webhook</dt><dd>{{if .WebhookOn}}on (<code>POST /hooks/email/bounce</code>){{else}}off (set <code>CERTS_BOUNCE_WEBHOOK_TOKEN</code>){{end}}</dd>
+  </dl>
+</section>
+
+<section class="panel">
+  <h2>Email queue</h2>
+  <p class="counts">
+    <span><strong>{{index .Counts "queued"}}</strong> queued</span>
+    <span><strong>{{index .Counts "sending"}}</strong> sending</span>
+    <span><strong>{{index .Counts "sent"}}</strong> sent</span>
+    <span{{if index .Counts "failed"}} class="bad"{{end}}><strong>{{index .Counts "failed"}}</strong> failed</span>
+    <span><strong>{{index .Counts "suppressed"}}</strong> suppressed</span>
+  </p>
+
+  <h3>Failed</h3>
+  {{if .Failed}}
+  <table class="table table-compact">
+    <thead><tr><th>When</th><th>To</th><th>Message</th><th>Attempts</th><th>Last error</th><th></th></tr></thead>
+    <tbody>{{range .Failed}}
+      <tr><td>{{datetime .CreatedAt}}</td><td>{{.To}}</td><td><code>{{.Template}}</code>{{with .ClientSlug}} <span class="muted">{{.}}</span>{{end}}</td>
+        <td>{{.Attempts}}</td><td class="err">{{.LastError}}</td>
+        <td>{{if .Retryable}}<form method="post" action="/super/system/emails/{{.ID}}/retry">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Retry</button></form>
+          {{else if .Suppressed}}<span class="muted">address suppressed</span>{{else}}<span class="muted">expired</span>{{end}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  {{else}}<p class="muted">Nothing has failed.</p>{{end}}
+
+  <h3>Recent</h3>
+  {{if .Recent}}
+  <table class="table table-compact">
+    <thead><tr><th>When</th><th>To</th><th>Message</th><th>Status</th></tr></thead>
+    <tbody>{{range .Recent}}
+      <tr><td>{{datetime .CreatedAt}}</td><td>{{.To}}</td><td><code>{{.Template}}</code>{{with .ClientSlug}} <span class="muted">{{.}}</span>{{end}}</td>
+        <td>{{.Status}}{{if gt .Attempts 1}} <span class="muted">({{.Attempts}} attempts)</span>{{end}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  {{else}}<p class="muted">No email yet.</p>{{end}}
+</section>
+
+<section class="panel">
+  <h2>Suppressed addresses</h2>
+  <p class="hint">Nothing is sent to these addresses: they bounced permanently, a recipient reported spam, or someone added them here.</p>
+  {{if .Suppressions}}
+  <table class="table table-compact">
+    <thead><tr><th>Address</th><th>Why</th><th>Source</th><th>Since</th><th></th></tr></thead>
+    <tbody>{{range .Suppressions}}
+      <tr><td>{{.Email}}</td><td class="err">{{.Reason}}</td><td>{{.Source}}</td><td>{{datetime .CreatedAt}}</td>
+        <td><form method="post" action="/super/system/suppressions/remove">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="email" value="{{.Email}}">
+          <button class="btn-link" type="submit">Allow again</button></form></td></tr>
+    {{end}}</tbody>
+  </table>
+  {{else}}<p class="muted">None.</p>{{end}}
+  <form class="inline-fields" method="post" action="/super/system/suppressions">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Email <input name="email" type="email" required></label>
+    <label>Reason <input name="reason"></label>
+    <button class="btn btn-ghost" type="submit">Suppress address</button>
+  </form>
+</section>
+{{end}}

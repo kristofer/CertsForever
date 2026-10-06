@@ -50,9 +50,11 @@
 </div>
 {{end}}
 
+{{if or .OrgBlurb .LearnURL}}
 <section class="about">
   <h3>About {{.Org}}</h3>
-  <p>{{.OrgBlurb}}</p>
-  <a class="link-cta" href="{{.LearnURL}}">Learn about the program <span aria-hidden="true">→</span></a>
+  {{with .OrgBlurb}}<p>{{.}}</p>{{end}}
+  {{with .LearnURL}}<a class="link-cta" href="{{.}}">Learn about the program <span aria-hidden="true">→</span></a>{{end}}
 </section>
+{{end}}
 {{end}}

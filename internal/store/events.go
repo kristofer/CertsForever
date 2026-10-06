@@ -13,13 +13,14 @@ const (
 	EventLearnMore     EventKind = "learn_more"     // visitor clicked through to the program site
 )
 
-// RecordEvent stores one event. Failures are the caller's to log; analytics
-// should never break a page view.
+// RecordEvent stores one event. The client is taken from the certificate.
+// Failures are the caller's to log; analytics should never break a page view.
 func (s *Store) RecordEvent(ctx context.Context, certID string, kind EventKind, referrerHost string) error {
-	_, err := s.wdb.ExecContext(ctx,
-		`INSERT INTO events (certificate_id, kind, referrer_host) VALUES (?, ?, NULLIF(?, ''))`,
-		certID, string(kind), referrerHost)
-	return err
+	res, err := s.wdb.ExecContext(ctx, `
+		INSERT INTO events (client_id, certificate_id, kind, referrer_host)
+		SELECT client_id, id, ?, NULLIF(?, '') FROM certificates WHERE id = ?`,
+		string(kind), referrerHost, certID)
+	return affectedOne(res, err)
 }
 
 // CourseStats summarizes certificates and traffic per course.
@@ -34,8 +35,12 @@ type CourseStats struct {
 	LearnMoreClks int    `json:"learn_more_clicks"`
 }
 
-// Stats returns per-course totals.
-func (s *Store) Stats(ctx context.Context) ([]CourseStats, error) {
+// Stats returns per-course totals for the scoped client.
+func (s *Store) Stats(ctx context.Context, sc Scope) ([]CourseStats, error) {
+	clientID, err := sc.id()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.rdb.QueryContext(ctx, `
 		WITH ev AS (
 			SELECT certificate_id,
@@ -44,7 +49,7 @@ func (s *Store) Stats(ctx context.Context) ([]CourseStats, error) {
 			       SUM(kind = 'linkedin_add')   AS adds,
 			       SUM(kind = 'linkedin_share') AS shares,
 			       SUM(kind = 'learn_more')     AS learn
-			FROM events GROUP BY certificate_id
+			FROM events WHERE client_id = ?1 GROUP BY certificate_id
 		)
 		SELECT co.slug,
 		       COUNT(c.id),
@@ -53,15 +58,15 @@ func (s *Store) Stats(ctx context.Context) ([]CourseStats, error) {
 		       COALESCE(SUM(ev.adds), 0), COALESCE(SUM(ev.shares), 0),
 		       COALESCE(SUM(ev.learn), 0)
 		FROM courses co
-		JOIN cohorts h ON h.course_id = co.id
-		JOIN certificates c ON c.cohort_id = h.id
+		JOIN certificates c ON c.course_id = co.id
 		LEFT JOIN ev ON ev.certificate_id = c.id
-		GROUP BY co.slug ORDER BY co.slug`)
+		WHERE co.client_id = ?1
+		GROUP BY co.slug ORDER BY co.slug`, clientID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []CourseStats
+	out := []CourseStats{}
 	for rows.Next() {
 		var cs CourseStats
 		if err := rows.Scan(&cs.Course, &cs.Certificates, &cs.Public, &cs.Views, &cs.PreviewFetch,

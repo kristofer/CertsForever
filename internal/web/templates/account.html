@@ -1,0 +1,20 @@
+{{define "title"}}Your account · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Your account</p>
+<h1 class="page-title">{{.User.DisplayName}}</h1>
+{{with .Notice}}<div class="status status-ok" role="status">{{.}}</div>{{end}}
+<section class="panel">
+  <dl class="kv">
+    <dt>Email</dt><dd>{{.User.Email}}</dd>
+    <dt>Role</dt><dd>{{if .User.IsSuper}}Platform administrator{{else}}Client administrator{{end}}</dd>
+    <dt>Clients</dt><dd>{{range $i, $c := .Clients}}{{if $i}}, {{end}}<a href="/admin/{{$c.Slug}}">{{$c.Name}}</a>{{else}}—{{end}}</dd>
+    <dt>Two-step verification</dt>
+    <dd>{{if .User.TOTPEnabled}}On{{else}}Off · <a href="/account/totp">Set up</a>{{end}}</dd>
+  </dl>
+</section>
+<form method="post" action="/account/sign-out-elsewhere">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <button class="btn btn-ghost" type="submit">Sign out of all other devices</button>
+</form>
+{{end}}

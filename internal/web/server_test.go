@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -11,39 +12,72 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"certsforever/internal/config"
+	"certsforever/internal/emails"
+	"certsforever/internal/mail"
+	"certsforever/internal/outbox"
+	"certsforever/internal/secretbox"
 	"certsforever/internal/store"
 )
 
 const adminToken = "test-admin-token"
 
 type harness struct {
-	t   *testing.T
-	srv *httptest.Server
-	st  *store.Store
+	t    *testing.T
+	srv  *httptest.Server
+	st   *store.Store
+	mail *mail.Recorder
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil) }
+
+// harnessOpts adjusts a test server.
+type harnessOpts struct {
+	noEmail bool // run with email off (no queue), like production without SMTP
+	cfg     func(*config.Config)
+}
+
+func newHarnessWith(t *testing.T, o *harnessOpts) *harness {
 	t.Helper()
-	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if o == nil {
+		o = &harnessOpts{}
+	}
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
 	cfg := config.FromEnv()
 	cfg.AdminToken = adminToken
-	cfg.SiteURL = "https://example.org/apply"
+	cfg.MasterKey = bytes.Repeat([]byte{7}, 32)
+	if o.cfg != nil {
+		o.cfg(&cfg)
+	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s, err := New(cfg, st, log)
+	rec := &mail.Recorder{}
+	box, _ := secretbox.New(cfg.MasterKey)
+	var q *outbox.Queue
+	if !o.noEmail {
+		q = outbox.NewQueue(st, box)
+	}
+	s, err := New(cfg, st, log, Deps{Queue: q})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 	s.cfg.BaseURL = ts.URL
-	return &harness{t: t, srv: ts, st: st}
+	if q != nil {
+		worker := &outbox.Worker{Queue: q, Sender: rec, Log: log, Poll: 20 * time.Millisecond,
+			Platform: emails.Platform{Name: cfg.PlatformName, BaseURL: ts.URL}}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); worker.Run(ctx) }()
+		t.Cleanup(func() { cancel(); <-done }) // stop before the store closes
+	}
+	return &harness{t: t, srv: ts, st: st, mail: rec}
 }
 
 // client does not follow redirects so tests can assert on them.
@@ -72,18 +106,24 @@ func TestCertificateLifecycle(t *testing.T) {
 	h := newHarness(t)
 
 	// Admin auth is enforced.
-	if resp, _ := h.do("GET", "/admin/api/stats", "", "", false); resp.StatusCode != 401 {
+	if resp, _ := h.do("GET", "/admin/api/clients", "", "", false); resp.StatusCode != 401 {
 		t.Fatalf("stats without token: %d", resp.StatusCode)
 	}
 
-	// Create a course and import a cohort.
-	resp, body := h.do("POST", "/admin/api/courses",
+	// Create a client and a course, then import a cohort.
+	resp, body := h.do("POST", "/admin/api/clients",
+		`{"slug":"zcw","name":"Zip Code Wilmington","id_prefix":"ZCW","site_url":"https://example.org/apply","blurb":"A coding school."}`,
+		"application/json", true)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create client: %d %s", resp.StatusCode, body)
+	}
+	resp, body = h.do("POST", "/admin/api/clients/zcw/courses",
 		`{"slug":"java","title":"Java Full-Stack Developer","skills":["Java","Spring","SQL"]}`, "application/json", true)
 	if resp.StatusCode != 200 {
 		t.Fatalf("create course: %d %s", resp.StatusCode, body)
 	}
 	csv := "email,full_name,course,cohort,completed_on\nada@example.com,Ada Lovelace,java,Java 13,2026-09-30\n"
-	resp, body = h.do("POST", "/admin/api/import", csv, "text/csv", true)
+	resp, body = h.do("POST", "/admin/api/clients/zcw/import", csv, "text/csv", true)
 	if resp.StatusCode != 200 {
 		t.Fatalf("import: %d %s", resp.StatusCode, body)
 	}
@@ -98,7 +138,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	}
 
 	// Re-import is idempotent.
-	_, body = h.do("POST", "/admin/api/import", csv, "text/csv", true)
+	_, body = h.do("POST", "/admin/api/clients/zcw/import", csv, "text/csv", true)
 	if !strings.Contains(body, `"existing": true`) || !strings.Contains(body, id) {
 		t.Fatalf("re-import should return existing cert: %s", body)
 	}
@@ -128,7 +168,7 @@ func TestCertificateLifecycle(t *testing.T) {
 		t.Fatalf("public cert page: %d", resp.StatusCode)
 	}
 	for _, want := range []string{"Ada Lovelace", "Java Full-Stack Developer", `property="og:image"`,
-		"/c/" + id + "/og.png", "Verified certificate", "Spring"} {
+		"/c/" + id + "/og.png", "Verified certificate issued by Zip Code Wilmington", "Spring", "A coding school."} {
 		if !strings.Contains(body, want) {
 			t.Errorf("cert page missing %q", want)
 		}
@@ -161,7 +201,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	}
 
 	// Stats count the human view, image fetch, add and learn-more.
-	_, body = h.do("GET", "/admin/api/stats", "", "", true)
+	_, body = h.do("GET", "/admin/api/clients/zcw/stats", "", "", true)
 	var stats []store.CourseStats
 	json.Unmarshal([]byte(body), &stats)
 	if len(stats) != 1 || stats[0].Public != 1 || stats[0].Views < 1 || stats[0].LinkedInAdds != 1 ||
@@ -170,7 +210,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	}
 
 	// Revoke: page stays up but says so.
-	resp, body = h.do("POST", "/admin/api/certificates/"+id+"/revoke", `{"reason":"test"}`, "application/json", true)
+	resp, body = h.do("POST", "/admin/api/clients/zcw/certificates/"+id+"/revoke", `{"reason":"test"}`, "application/json", true)
 	if resp.StatusCode != 200 {
 		t.Fatalf("revoke: %d %s", resp.StatusCode, body)
 	}
@@ -180,7 +220,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	}
 
 	// New claim link invalidates the old one.
-	_, body = h.do("POST", "/admin/api/certificates/"+id+"/claim-link", "", "", true)
+	_, body = h.do("POST", "/admin/api/clients/zcw/certificates/"+id+"/claim-link", "", "", true)
 	if !strings.Contains(body, "claim_url") {
 		t.Fatalf("claim-link: %s", body)
 	}
@@ -192,7 +232,12 @@ func TestCertificateLifecycle(t *testing.T) {
 func TestReadyz(t *testing.T) {
 	h := newHarness(t)
 	resp, body := h.do("GET", "/readyz", "", "", false)
-	if resp.StatusCode != 200 || !strings.Contains(body, `"status": "ok"`) || !strings.Contains(body, `"schema_version": 1`) {
+	var ready struct {
+		Status        string `json:"status"`
+		SchemaVersion int    `json:"schema_version"`
+	}
+	json.Unmarshal([]byte(body), &ready)
+	if resp.StatusCode != 200 || ready.Status != "ok" || ready.SchemaVersion < 2 {
 		t.Fatalf("readyz: %d %s", resp.StatusCode, body)
 	}
 	h.st.Close() // database gone -> not ready
@@ -216,5 +261,122 @@ func TestVerifyRedirectsAndUnknownIDs(t *testing.T) {
 	}
 	if resp, _ := h.do("GET", "/claim/not-a-token", "", "", false); resp.StatusCode != 404 {
 		t.Errorf("bad claim token: %d", resp.StatusCode)
+	}
+}
+
+// issueOne creates client+course and issues one certificate through the
+// admin API, returning its ID and claim path.
+func (h *harness) issueOne(client, prefix, name, site, course, student string) (id, claimPath string) {
+	h.t.Helper()
+	body := `{"slug":"` + client + `","name":"` + name + `","id_prefix":"` + prefix + `","site_url":"` + site + `"}`
+	if resp, b := h.do("POST", "/admin/api/clients", body, "application/json", true); resp.StatusCode != 201 {
+		h.t.Fatalf("create client %s: %d %s", client, resp.StatusCode, b)
+	}
+	if resp, b := h.do("POST", "/admin/api/clients/"+client+"/courses", `{"slug":"`+course+`","title":"`+course+` course"}`,
+		"application/json", true); resp.StatusCode != 200 {
+		h.t.Fatalf("create course: %d %s", resp.StatusCode, b)
+	}
+	csv := "email,full_name,course,cohort,completed_on\nsame@example.com," + student + "," + course + ",C1,2026-09-30\n"
+	resp, b := h.do("POST", "/admin/api/clients/"+client+"/import", csv, "text/csv", true)
+	if resp.StatusCode != 200 {
+		h.t.Fatalf("import: %d %s", resp.StatusCode, b)
+	}
+	var links []IssuedLink
+	json.Unmarshal([]byte(b), &links)
+	claimPath = strings.TrimPrefix(links[0].ClaimURL, h.srv.URL)
+	h.do("POST", claimPath, "visibility=public", "application/x-www-form-urlencoded", false)
+	return links[0].CertificateID, claimPath
+}
+
+func TestAdminAPIIsolatesClients(t *testing.T) {
+	h := newHarness(t)
+	aID, _ := h.issueOne("zcw", "ZCW", "Zip Code Wilmington", "https://zipcode.example/apply", "java", "Ada")
+	bID, bClaim := h.issueOne("twa", "TWA", "TwinArrows", "https://twinarrows.example/", "data", "Bea")
+	if !strings.HasPrefix(aID, "ZCW-") || !strings.HasPrefix(bID, "TWA-") {
+		t.Fatalf("ids: %s %s", aID, bID)
+	}
+
+	// Every per-certificate route, addressed through client A, must 404 for B's certificate.
+	for _, r := range []struct{ method, path string }{
+		{"GET", "/admin/api/clients/zcw/certificates/" + bID},
+		{"POST", "/admin/api/clients/zcw/certificates/" + bID + "/revoke"},
+		{"POST", "/admin/api/clients/zcw/certificates/" + bID + "/claim-link"},
+	} {
+		if resp, body := h.do(r.method, r.path, "", "", true); resp.StatusCode != 404 {
+			t.Errorf("%s %s = %d %s, want 404", r.method, r.path, resp.StatusCode, body)
+		}
+	}
+	// B's certificate and claim link are untouched.
+	if resp, body := h.do("GET", bClaim, "", "", false); resp.StatusCode != 200 || !strings.Contains(body, "data course") {
+		t.Fatalf("B's claim page broken: %d", resp.StatusCode)
+	}
+
+	// A can't issue against B's course slug.
+	csv := "email,full_name,course,cohort,completed_on\nx@example.com,X,data,C1,2026-09-30\n"
+	if resp, body := h.do("POST", "/admin/api/clients/zcw/import", csv, "text/csv", true); resp.StatusCode != 400 ||
+		!strings.Contains(body, `unknown course`) {
+		t.Errorf("A imported into B's course: %d %s", resp.StatusCode, body)
+	}
+
+	// Lists and stats are per client.
+	_, body := h.do("GET", "/admin/api/clients/zcw/certificates", "", "", true)
+	if strings.Contains(body, bID) || !strings.Contains(body, aID) {
+		t.Errorf("A's list leaks B: %s", body)
+	}
+	_, body = h.do("GET", "/admin/api/clients/zcw/courses", "", "", true)
+	if strings.Contains(body, `"data"`) {
+		t.Errorf("A's courses leak B: %s", body)
+	}
+	if resp, _ := h.do("GET", "/admin/api/clients/nope/stats", "", "", true); resp.StatusCode != 404 {
+		t.Errorf("unknown client: %d", resp.StatusCode)
+	}
+
+	// Public pages carry the issuing client's branding, not another client's.
+	_, body = h.do("GET", "/c/"+bID, "", "", false)
+	if !strings.Contains(body, "Verified certificate issued by TwinArrows") || strings.Contains(body, "Zip Code") {
+		t.Errorf("B's public page has the wrong branding")
+	}
+	resp, _ := h.do("GET", "/c/"+bID+"/learn", "", "", false)
+	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "https://twinarrows.example/?") || !strings.Contains(loc, "utm_campaign=data") {
+		t.Errorf("B's learn-more goes to %s", loc)
+	}
+	_, body = h.do("GET", "/c/"+aID+"/credential.json", "", "", false)
+	if !strings.Contains(body, `"name": "Zip Code Wilmington"`) {
+		t.Errorf("A's credential issuer: %s", body)
+	}
+}
+
+func TestAdminClientManagement(t *testing.T) {
+	h := newHarness(t)
+	for _, c := range []struct {
+		body string
+		want int
+	}{
+		{`{"slug":"zcw","name":"Zip Code","id_prefix":"ZCW"}`, 201},
+		{`{"slug":"zcw","name":"Again","id_prefix":"ZZZ"}`, 409},            // slug taken
+		{`{"slug":"other","name":"Other","id_prefix":"ZCW"}`, 409},          // prefix taken
+		{`{"slug":"bad slug","name":"x","id_prefix":"BS"}`, 400},            // invalid slug
+		{`{"slug":"ok","name":"x","id_prefix":"OK","color":"red"}`, 400},    // unknown field
+		{`{"slug":"ok2","name":"x","id_prefix":"OKK","site_url":"x"}`, 400}, // bad URL
+	} {
+		if resp, body := h.do("POST", "/admin/api/clients", c.body, "application/json", true); resp.StatusCode != c.want {
+			t.Errorf("POST %s = %d %s, want %d", c.body, resp.StatusCode, body, c.want)
+		}
+	}
+	resp, body := h.do("PATCH", "/admin/api/clients/zcw", `{"linkedin_org_id":"12345","slug":"hijack"}`, "application/json", true)
+	if resp.StatusCode != 200 || !strings.Contains(body, `"linkedin_org_id": "12345"`) || !strings.Contains(body, `"slug": "zcw"`) {
+		t.Errorf("PATCH: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := h.do("POST", "/admin/api/clients/zcw/status", `{"status":"suspended"}`, "application/json", true); resp.StatusCode != 200 {
+		t.Fatalf("suspend: %d", resp.StatusCode)
+	}
+	h.do("POST", "/admin/api/clients/zcw/courses", `{"slug":"java","title":"Java"}`, "application/json", true)
+	csv := "email,full_name,course,cohort,completed_on\nx@example.com,X,java,C1,2026-09-30\n"
+	if resp, body := h.do("POST", "/admin/api/clients/zcw/import", csv, "text/csv", true); resp.StatusCode != 409 {
+		t.Errorf("suspended client imported: %d %s", resp.StatusCode, body)
+	}
+	_, body = h.do("GET", "/admin/api/clients", "", "", true)
+	if !strings.Contains(body, `"status": "suspended"`) {
+		t.Errorf("list: %s", body)
 	}
 }

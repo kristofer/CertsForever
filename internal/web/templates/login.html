@@ -1,0 +1,25 @@
+{{define "title"}}Sign in · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Administrators</p>
+<h1 class="page-title">Sign in</h1>
+{{if .SignedOut}}<div class="status status-ok" role="status">You're signed out.</div>{{end}}
+{{if .Sent}}
+<section class="panel">
+  <h2>Check your email</h2>
+  <p>If <strong>{{.Email}}</strong> has an administrator account, a sign-in link is on its way. It works once and expires in 15 minutes.</p>
+  <p class="hint">Nothing arrived? Check spam, or <a href="/login">try again</a>.</p>
+</section>
+{{else}}
+{{if .NoMail}}
+<div class="status status-revoked" role="status">Email sign-in isn't set up on this server yet. Ask your platform administrator for a sign-in link.</div>
+{{end}}
+<form class="verify" method="post" action="/login">
+  <label for="email" class="sr-only">Email address</label>
+  <input id="email" name="email" type="email" value="{{.Email}}" placeholder="you@example.org" autocomplete="email" required autofocus>
+  <button class="btn" type="submit">Email me a sign-in link</button>
+</form>
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+<p class="hint">There are no passwords. We email you a link each time you sign in.</p>
+{{end}}
+{{end}}

@@ -83,6 +83,10 @@ for verifiers, so it shows "Share" but not "Add to *your* profile".
 
 ### Admin (JSON, `Authorization: Bearer $CERTS_ADMIN_TOKEN`)
 
+> Since Milestone 1, client data routes are nested under
+> `/admin/api/clients/{client}/` (e.g. `/admin/api/clients/zcw/import`), and
+> `/admin/api/clients` creates and lists clients. See the README.
+
 | method | path | body / query | returns |
 |---|---|---|---|
 | POST | `/admin/api/courses` | `{slug,title,description,skills[],hours}` | course (upsert by slug) |

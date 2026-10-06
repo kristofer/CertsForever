@@ -60,12 +60,14 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		s.track(r, c.ID, store.EventView)
 	}
 	p := certPage{
-		base:         s.base(),
+		base:         s.issuerBase(c),
 		Cert:         c,
 		CanonicalURL: s.certURL(c.ID),
 		OGImageURL:   s.certURL(c.ID) + "/og.png",
 		ShareURL:     "/c/" + c.ID + "/share/linkedin",
-		LearnURL:     "/c/" + c.ID + "/learn",
+	}
+	if c.Issuer.SiteURL != "" {
+		p.LearnURL = "/c/" + c.ID + "/learn"
 	}
 	p.NoIndex = c.Revoked()
 	s.render(w, http.StatusOK, "cert.html", p)
@@ -77,7 +79,7 @@ func (s *Server) handleOGImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	png, err := ogimage.Render(ogimage.Card{
-		Org:     s.cfg.OrgName,
+		Org:     c.Issuer.Name,
 		Heading: "Certificate of Completion",
 		Name:    c.RecipientName,
 		Course:  c.CourseTitle,
@@ -110,7 +112,7 @@ func (s *Server) handleCredentialJSON(w http.ResponseWriter, r *http.Request) {
 		"skills":     c.Skills,
 		"issued_on":  c.IssuedOn.Format("2006-01-02"),
 		"status":     c.Status,
-		"issuer":     map[string]string{"name": s.cfg.OrgName, "url": s.cfg.SiteURL},
+		"issuer":     map[string]string{"name": c.Issuer.Name, "url": c.Issuer.SiteURL},
 		"revoked_at": c.RevokedAt,
 	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -132,12 +134,12 @@ func (s *Server) handleLearnMore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.track(r, c.ID, store.EventLearnMore)
-	u, err := url.Parse(s.cfg.SiteURL)
-	if err != nil {
-		http.Error(w, "bad site url", http.StatusInternalServerError)
+	u, err := url.Parse(c.Issuer.SiteURL)
+	if c.Issuer.SiteURL == "" || err != nil {
+		s.notFound(w)
 		return
 	}
+	s.track(r, c.ID, store.EventLearnMore)
 	q := u.Query()
 	q.Set("utm_source", "certificate")
 	q.Set("utm_medium", "referral")
@@ -154,13 +156,13 @@ type verifyPage struct {
 
 func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("id"))
-	p := verifyPage{base: s.base(), Query: q}
+	p := verifyPage{base: s.platformBase(), Query: q}
 	if q != "" {
 		if id, ok := certid.Normalize(q); ok {
 			http.Redirect(w, r, "/c/"+id, http.StatusSeeOther)
 			return
 		}
-		p.Error = "That doesn't look like a certificate ID. IDs look like " + certid.Prefix + "7K3M9QF2XA."
+		p.Error = "That doesn't look like a certificate ID. IDs look like ZCW-7K3M9QF2XA: letters, a dash, then 10 characters."
 	}
 	s.render(w, http.StatusOK, "verify.html", p)
 }
@@ -199,7 +201,7 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	token := r.PathValue("token")
 	p := claimPage{
-		base:        s.base(),
+		base:        s.issuerBase(c),
 		Cert:        c,
 		Token:       token,
 		PublicURL:   s.certURL(c.ID),
@@ -222,7 +224,7 @@ func (s *Server) handleClaimUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vis := r.FormValue("visibility")
-	if err := s.store.SetVisibility(r.Context(), c.ID, vis); err != nil {
+	if err := s.store.SetVisibilityByClaimToken(r.Context(), r.PathValue("token"), vis); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -241,8 +243,8 @@ func (s *Server) handleAddToLinkedIn(w http.ResponseWriter, r *http.Request) {
 	s.track(r, c.ID, store.EventLinkedInAdd)
 	http.Redirect(w, r, linkedin.AddToProfileURL(linkedin.Certification{
 		Name:    c.CourseTitle,
-		OrgID:   s.cfg.LinkedInOrgID,
-		OrgName: s.cfg.OrgName,
+		OrgID:   c.Issuer.LinkedInOrgID,
+		OrgName: c.Issuer.Name,
 		Issued:  c.IssuedOn,
 		CertURL: s.certURL(c.ID),
 		CertID:  c.ID,

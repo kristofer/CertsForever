@@ -1,0 +1,15 @@
+{{define "title"}}Clients · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Administration</p>
+<h1 class="page-title">Clients</h1>
+{{if .Clients}}
+<ul class="cards">
+  {{range .Clients}}
+  <li><a href="/admin/{{.Slug}}"><strong>{{.Name}}</strong> <span class="muted">{{.IDPrefix}} · {{.Status}}</span></a></li>
+  {{end}}
+</ul>
+{{else}}
+<p class="muted">You don't administer any clients yet. Ask a platform administrator to invite you.</p>
+{{end}}
+{{end}}

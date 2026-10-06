@@ -1,0 +1,15 @@
+{{define "title"}}Verification code · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Two-step verification</p>
+<h1 class="page-title">Enter your code</h1>
+<p class="muted">Open your authenticator app and enter the 6-digit code for {{.Org}}.</p>
+<form class="verify" method="post" action="/login/totp">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label for="code" class="sr-only">Code</label>
+  <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" placeholder="123456" required autofocus>
+  <button class="btn" type="submit">Verify</button>
+</form>
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+<p class="hint">Lost your phone? Ask another platform administrator to reset your two-step verification.</p>
+{{end}}

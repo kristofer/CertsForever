@@ -24,20 +24,44 @@ func openTest(t *testing.T) (*Store, string) {
 	return s, path
 }
 
-func seed(t *testing.T, s *Store) IssueResult {
+func ptr(s string) *string { return &s }
+
+// newClient creates a client and returns its scope.
+func newClient(t *testing.T, s *Store, slug, prefix string) Scope {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := s.CreateCourse(ctx, Course{Slug: "java", Title: "Java Developer", Skills: []string{"Java", " ", "SQL"}}); err != nil {
+	if _, err := s.CreateClient(ctx, ClientInput{Slug: slug, Name: ptr(strings.ToUpper(slug) + " Academy"), IDPrefix: ptr(prefix)}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.Issue(ctx, []IssueRequest{{
+	sc, err := s.Scope(ctx, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sc
+}
+
+func seed(t *testing.T, s *Store) IssueResult {
+	t.Helper()
+	_, r := seedScoped(t, s)
+	return r
+}
+
+// seedScoped creates client "zcw" with course "java" and one certificate.
+func seedScoped(t *testing.T, s *Store) (Scope, IssueResult) {
+	t.Helper()
+	ctx := context.Background()
+	sc := newClient(t, s, "zcw", "ZCW")
+	if _, err := s.CreateCourse(ctx, sc, Course{Slug: "java", Title: "Java Developer", Skills: []string{"Java", " ", "SQL"}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Issue(ctx, sc, []IssueRequest{{
 		Email: "ada@example.com", FullName: "Ada Lovelace", CourseSlug: "java", Cohort: "J1",
 		CompletedOn: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return res[0]
+	return sc, res[0]
 }
 
 func pragma(t *testing.T, db *sql.DB, name string) string {
@@ -72,9 +96,15 @@ func TestPragmas(t *testing.T) {
 
 func TestForeignKeysEnforced(t *testing.T) {
 	s, _ := openTest(t)
-	err := s.RecordEvent(context.Background(), "ZCW-NOSUCHCERT", EventView, "")
-	if err == nil {
-		t.Fatal("event for a missing certificate should violate the foreign key")
+	r := seed(t, s)
+	if err := s.RecordEvent(context.Background(), "ZCW-NOSUCHCERT", EventView, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("event for a missing certificate: %v", err)
+	}
+	if _, err := s.wdb.Exec(`INSERT INTO events (client_id, certificate_id, kind) VALUES (1, 'ZCW-NOSUCHCERT', 'view')`); err == nil {
+		t.Fatal("raw insert of an event for a missing certificate should violate the foreign key")
+	}
+	if err := s.RecordEvent(context.Background(), r.CertificateID, EventView, ""); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -231,7 +261,7 @@ func TestLegacyMigrationsTableIsUpgraded(t *testing.T) {
 func TestBackupAndRestore(t *testing.T) {
 	ctx := context.Background()
 	s, path := openTest(t)
-	r := seed(t, s)
+	sc, r := seedScoped(t, s)
 	backup := filepath.Join(t.TempDir(), "nested", "backup.db")
 	if err := s.Backup(ctx, backup); err != nil {
 		t.Fatal(err)
@@ -244,7 +274,7 @@ func TestBackupAndRestore(t *testing.T) {
 	}
 
 	// Change the live db after the backup, then restore.
-	if err := s.Revoke(ctx, r.CertificateID, "oops"); err != nil {
+	if err := s.Revoke(ctx, sc, r.CertificateID, "oops"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -276,7 +306,7 @@ func TestBackupAndRestore(t *testing.T) {
 func TestConcurrentReadsAndWrites(t *testing.T) {
 	ctx := context.Background()
 	s, _ := openTest(t)
-	r := seed(t, s)
+	sc, r := seedScoped(t, s)
 	var wg sync.WaitGroup
 	errs := make(chan error, 1000)
 	for w := 0; w < 16; w++ {
@@ -295,7 +325,7 @@ func TestConcurrentReadsAndWrites(t *testing.T) {
 				if _, err := s.GetCertificate(ctx, r.CertificateID); err != nil {
 					errs <- err
 				}
-				if _, err := s.Stats(ctx); err != nil {
+				if _, err := s.Stats(ctx, sc); err != nil {
 					errs <- err
 				}
 			}
@@ -306,7 +336,7 @@ func TestConcurrentReadsAndWrites(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err) // e.g. "database is locked" would show up here
 	}
-	st, _ := s.Stats(ctx)
+	st, _ := s.Stats(ctx, sc)
 	if len(st) != 1 || st[0].Views != 16*25 {
 		t.Fatalf("views = %+v, want %d", st, 16*25)
 	}
@@ -315,11 +345,11 @@ func TestConcurrentReadsAndWrites(t *testing.T) {
 func TestIssueIsIdempotentAndAtomic(t *testing.T) {
 	ctx := context.Background()
 	s, _ := openTest(t)
-	first := seed(t, s)
+	sc, first := seedScoped(t, s)
 	if first.ClaimToken == "" || first.Existing {
 		t.Fatalf("first issue: %+v", first)
 	}
-	again, err := s.Issue(ctx, []IssueRequest{{
+	again, err := s.Issue(ctx, sc, []IssueRequest{{
 		Email: "ADA@example.com", FullName: "Ada L.", CourseSlug: "java", Cohort: "J1",
 		CompletedOn: time.Now(),
 	}})
@@ -331,14 +361,14 @@ func TestIssueIsIdempotentAndAtomic(t *testing.T) {
 	}
 
 	// A bad row anywhere rolls back the whole batch.
-	_, err = s.Issue(ctx, []IssueRequest{
+	_, err = s.Issue(ctx, sc, []IssueRequest{
 		{Email: "alan@example.com", FullName: "Alan Turing", CourseSlug: "java", Cohort: "J1", CompletedOn: time.Now()},
 		{Email: "x@example.com", FullName: "X", CourseSlug: "nope", Cohort: "J1", CompletedOn: time.Now()},
 	})
 	if err == nil || !strings.Contains(err.Error(), `unknown course "nope"`) {
 		t.Fatalf("err = %v", err)
 	}
-	list, _ := s.ListCertificates(ctx, "", "")
+	list, _ := s.ListCertificates(ctx, sc, "", "")
 	if len(list) != 1 {
 		t.Fatalf("batch was not atomic: %d certificates", len(list))
 	}
@@ -350,25 +380,31 @@ func TestIssueIsIdempotentAndAtomic(t *testing.T) {
 func TestLifecycleErrors(t *testing.T) {
 	ctx := context.Background()
 	s, _ := openTest(t)
-	r := seed(t, s)
+	sc, r := seedScoped(t, s)
 
-	if err := s.SetVisibility(ctx, r.CertificateID, "everyone"); err == nil {
-		t.Error("invalid visibility accepted")
+	if err := s.SetVisibilityByClaimToken(ctx, r.ClaimToken, "everyone"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("invalid visibility: %v", err)
 	}
-	if err := s.SetVisibility(ctx, "ZCW-0000000000", "public"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("missing cert: %v", err)
+	if err := s.SetVisibilityByClaimToken(ctx, "not-a-token", "public"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("bad token: %v", err)
 	}
-	if err := s.Revoke(ctx, r.CertificateID, "x"); err != nil {
+	if err := s.SetVisibilityByClaimToken(ctx, r.ClaimToken, "public"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Revoke(ctx, r.CertificateID, "x"); !errors.Is(err, ErrNotFound) {
+	if err := s.Revoke(ctx, sc, r.CertificateID, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Revoke(ctx, sc, r.CertificateID, "x"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("double revoke: %v", err)
+	}
+	if err := s.SetVisibilityByClaimToken(ctx, r.ClaimToken, "private"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("revoked certificates' visibility must be frozen: %v", err)
 	}
 	c, _ := s.GetCertificateByClaimToken(ctx, r.ClaimToken)
 	if c == nil || c.ID != r.CertificateID {
 		t.Fatal("claim token lookup failed")
 	}
-	tok, err := s.NewClaimLink(ctx, r.CertificateID)
+	tok, err := s.NewClaimLink(ctx, sc, r.CertificateID)
 	if err != nil {
 		t.Fatal(err)
 	}

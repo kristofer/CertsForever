@@ -186,7 +186,21 @@ func hashToken(token string) []byte {
 const timeLayout = "2006-01-02T15:04:05Z"
 const dateLayout = "2006-01-02"
 
-func nowUTC() string { return time.Now().UTC().Format(timeLayout) }
+// clock is the store's notion of now; tests replace it to move time.
+var clock = time.Now
+
+func nowUTC() string { return clock().UTC().Format(timeLayout) }
+
+// SetClockForTest replaces the store's clock and returns a function that
+// restores it. Tests in other packages use it to exercise expiry and retry
+// schedules; production code must never call it.
+func SetClockForTest(now func() time.Time) (restore func()) {
+	prev := clock
+	clock = now
+	return func() { clock = prev }
+}
+
+func fmtTime(t time.Time) string { return t.UTC().Format(timeLayout) }
 
 func parseTime(s sql.NullString) *time.Time {
 	if !s.Valid || s.String == "" {

@@ -21,6 +21,9 @@ services:
     environment:
       CERTS_DB: /data/certs.db
       CERTS_ADDR: ":8080"
+      # Only reachable through a reverse proxy (Caddy or yours), which sets
+      # X-Forwarded-For; rate limits and the audit log use the real client IP.
+      CERTS_TRUST_PROXY: "true"
     ports:
       # Localhost only: Caddy (or your own proxy) terminates TLS in front.
       - "127.0.0.1:${CERTS_PORT:-8080}:8080"

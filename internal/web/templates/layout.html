@@ -10,13 +10,21 @@
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="/">{{.Org}}</a>
+  <a class="brand" href="{{if .User}}/admin{{else}}/{{end}}">{{.Org}}</a>
   <span class="brand-sub">Certificates</span>
+  {{with .User}}
+  <nav class="usernav" aria-label="Account">
+    <a href="/admin">Clients</a>
+    {{if .IsSuper}}<a href="/super">Platform</a><a href="/super/system">System</a>{{end}}
+    <a href="/account">{{.DisplayName}}</a>
+    <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Sign out</button></form>
+  </nav>
+  {{end}}
 </header>
-<main>
+<main{{if .User}} class="console"{{end}}>
 {{block "content" .}}{{end}}
 </main>
-<footer class="foot">
+<footer class="foot{{if .User}} console{{end}}">
   <a href="/verify">Verify a certificate</a>
   <span aria-hidden="true">·</span>
   <a href="{{.SiteURL}}">{{.Org}}</a>

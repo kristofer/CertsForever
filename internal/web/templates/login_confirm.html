@@ -1,0 +1,10 @@
+{{define "title"}}Sign in · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Administrators</p>
+<h1 class="page-title">Sign in as {{.ConfirmUser.Email}}?</h1>
+<form method="post" action="/login/{{.Token}}">
+  <button class="btn" type="submit" autofocus>Sign in</button>
+</form>
+<p class="hint">Not you? Close this page; the link stays unused.</p>
+{{end}}

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Course is a program a certificate can be issued for.
+// Course is a program a client issues certificates for.
 type Course struct {
 	ID          int64    `json:"id"`
 	Slug        string   `json:"slug"`
@@ -19,13 +19,17 @@ type Course struct {
 	Hours       int      `json:"hours,omitempty"`
 }
 
-// CreateCourse inserts a course, or updates the title/description/skills of
-// an existing course with the same slug. Already-issued certificates are not
-// affected (they keep their snapshot).
-func (s *Store) CreateCourse(ctx context.Context, c Course) (int64, error) {
+// CreateCourse inserts a course for the scoped client, or updates the
+// title/description/skills of its existing course with the same slug.
+// Already-issued certificates are not affected (they keep their snapshot).
+func (s *Store) CreateCourse(ctx context.Context, sc Scope, c Course) (int64, error) {
+	clientID, err := sc.id()
+	if err != nil {
+		return 0, err
+	}
 	c.Slug = strings.TrimSpace(strings.ToLower(c.Slug))
-	if c.Slug == "" || strings.TrimSpace(c.Title) == "" {
-		return 0, errors.New("course slug and title are required")
+	if !slugRE.MatchString(c.Slug) || strings.TrimSpace(c.Title) == "" {
+		return 0, fmt.Errorf("%w: course needs a slug (2–40 lowercase letters, digits, dashes) and a title", ErrInvalid)
 	}
 	skills, err := json.Marshal(cleanSkills(c.Skills))
 	if err != nil {
@@ -37,28 +41,59 @@ func (s *Store) CreateCourse(ctx context.Context, c Course) (int64, error) {
 	}
 	var id int64
 	err = s.wdb.QueryRowContext(ctx, `
-		INSERT INTO courses (slug, title, description, skills, hours)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(slug) DO UPDATE SET
+		INSERT INTO courses (client_id, slug, title, description, skills, hours)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(client_id, slug) DO UPDATE SET
 			title = excluded.title,
 			description = excluded.description,
 			skills = excluded.skills,
 			hours = excluded.hours
-		RETURNING id`, c.Slug, c.Title, c.Description, string(skills), hours).Scan(&id)
+		RETURNING id`, clientID, c.Slug, c.Title, c.Description, string(skills), hours).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("create course: %w", err)
 	}
 	return id, nil
 }
 
-// GetCourse looks up a course by slug.
-func (s *Store) GetCourse(ctx context.Context, slug string) (*Course, error) {
+const courseSelect = `SELECT id, slug, title, description, skills, hours FROM courses`
+
+// GetCourse looks up one of the scoped client's courses by slug.
+func (s *Store) GetCourse(ctx context.Context, sc Scope, slug string) (*Course, error) {
+	clientID, err := sc.id()
+	if err != nil {
+		return nil, err
+	}
+	return scanCourse(s.rdb.QueryRowContext(ctx, courseSelect+` WHERE client_id = ? AND slug = ?`,
+		clientID, strings.ToLower(slug)))
+}
+
+// ListCourses returns the scoped client's courses.
+func (s *Store) ListCourses(ctx context.Context, sc Scope) ([]Course, error) {
+	clientID, err := sc.id()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.rdb.QueryContext(ctx, courseSelect+` WHERE client_id = ? ORDER BY slug`, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Course{}
+	for rows.Next() {
+		c, err := scanCourse(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	return out, rows.Err()
+}
+
+func scanCourse(r rowScanner) (*Course, error) {
 	var c Course
 	var skills string
 	var hours sql.NullInt64
-	err := s.rdb.QueryRowContext(ctx,
-		`SELECT id, slug, title, description, skills, hours FROM courses WHERE slug = ?`,
-		strings.ToLower(slug)).Scan(&c.ID, &c.Slug, &c.Title, &c.Description, &skills, &hours)
+	err := r.Scan(&c.ID, &c.Slug, &c.Title, &c.Description, &skills, &hours)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

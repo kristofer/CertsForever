@@ -19,6 +19,9 @@ import (
 
 	"certsforever/internal/buildinfo"
 	"certsforever/internal/config"
+	"certsforever/internal/outbox"
+	"certsforever/internal/ratelimit"
+	"certsforever/internal/secretbox"
 	"certsforever/internal/store"
 )
 
@@ -30,15 +33,53 @@ type Server struct {
 	cfg   config.Config
 	store *store.Store
 	log   *slog.Logger
-	pages map[string]*template.Template
-	mux   *http.ServeMux
+	queue *outbox.Queue // nil when email isn't configured
+	// emailMode describes delivery for the System page ("SMTP", "log", "off").
+	emailMode string
+	box       *secretbox.Box
+	limits    limits
+	pages     map[string]*template.Template
+	mux       *http.ServeMux
+}
+
+type limits struct {
+	loginIP, loginEmail, linkIP, totp, adminToken *ratelimit.Limiter
+}
+
+// Deps are the Server's replaceable collaborators.
+type Deps struct {
+	// Queue is the email outbox. nil means email isn't configured: sign-in
+	// links must be printed with the CLI, and nothing is sent to students.
+	Queue *outbox.Queue
+	// EmailMode describes delivery for the System page.
+	EmailMode string
 }
 
 // New builds a Server and registers its routes.
-func New(cfg config.Config, st *store.Store, log *slog.Logger) (*Server, error) {
-	s := &Server{cfg: cfg, store: st, log: log, pages: map[string]*template.Template{}, mux: http.NewServeMux()}
-	funcs := template.FuncMap{"date": formatDate, "month": formatMonth}
-	for _, p := range []string{"cert.html", "claim.html", "verify.html", "message.html"} {
+func New(cfg config.Config, st *store.Store, log *slog.Logger, deps Deps) (*Server, error) {
+	box, err := secretbox.New(cfg.MasterKey)
+	if err != nil {
+		return nil, fmt.Errorf("master key: %w", err)
+	}
+	if deps.EmailMode == "" {
+		deps.EmailMode = "off: CERTS_SMTP_URL not set"
+		if deps.Queue != nil {
+			deps.EmailMode = "on"
+		}
+	}
+	s := &Server{cfg: cfg, store: st, log: log, queue: deps.Queue, emailMode: deps.EmailMode, box: box,
+		pages: map[string]*template.Template{}, mux: http.NewServeMux(),
+		limits: limits{
+			loginIP:    ratelimit.New(10, 10, 15*time.Minute), // sign-in emails per IP
+			loginEmail: ratelimit.New(3, 3, 15*time.Minute),   // sign-in emails per address
+			linkIP:     ratelimit.New(20, 20, 15*time.Minute), // link uses per IP
+			totp:       ratelimit.New(5, 5, 5*time.Minute),    // codes per user
+			adminToken: ratelimit.New(10, 10, time.Minute),    // failed admin-token attempts per IP
+		}}
+	funcs := template.FuncMap{"date": formatDate, "month": formatMonth, "datetime": formatDateTime}
+	for _, p := range []string{"cert.html", "claim.html", "verify.html", "message.html",
+		"login.html", "login_confirm.html", "totp.html", "totp_setup.html",
+		"account.html", "admin_home.html", "client.html", "super.html", "system.html"} {
 		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+p)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", p, err)
@@ -69,13 +110,55 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /claim/{token}", s.handleClaimUpdate)
 	m.HandleFunc("GET /claim/{token}/linkedin/add", s.handleAddToLinkedIn)
 
-	// Admin JSON API (Authorization: Bearer $CERTS_ADMIN_TOKEN).
-	m.Handle("POST /admin/api/courses", s.admin(s.handleCreateCourse))
-	m.Handle("POST /admin/api/import", s.admin(s.handleImport))
-	m.Handle("GET /admin/api/certificates", s.admin(s.handleListCerts))
-	m.Handle("POST /admin/api/certificates/{id}/revoke", s.admin(s.handleRevoke))
-	m.Handle("POST /admin/api/certificates/{id}/claim-link", s.admin(s.handleNewClaimLink))
-	m.Handle("GET /admin/api/stats", s.admin(s.handleStats))
+	// Admin JSON API (Authorization: Bearer $CERTS_ADMIN_TOKEN). Everything
+	// about one client's data lives under /admin/api/clients/{client}/.
+	m.Handle("GET /admin/api/clients", s.admin(s.handleListClients))
+	m.Handle("POST /admin/api/clients", s.admin(s.handleCreateClient))
+	c := "/admin/api/clients/{client}"
+	m.Handle("GET "+c, s.admin(s.scoped(s.handleGetClient)))
+	m.Handle("PATCH "+c, s.admin(s.scoped(s.handleUpdateClient)))
+	m.Handle("POST "+c+"/status", s.admin(s.scoped(s.handleClientStatus)))
+	m.Handle("GET "+c+"/courses", s.admin(s.scoped(s.handleListCourses)))
+	m.Handle("POST "+c+"/courses", s.admin(s.scoped(s.handleCreateCourse)))
+	m.Handle("POST "+c+"/import", s.admin(s.scoped(s.handleImport)))
+	m.Handle("GET "+c+"/certificates", s.admin(s.scoped(s.handleListCerts)))
+	m.Handle("GET "+c+"/certificates/{id}", s.admin(s.scoped(s.handleGetCert)))
+	m.Handle("POST "+c+"/certificates/{id}/revoke", s.admin(s.scoped(s.handleRevoke)))
+	m.Handle("POST "+c+"/certificates/{id}/claim-link", s.admin(s.scoped(s.handleNewClaimLink)))
+	m.Handle("GET "+c+"/stats", s.admin(s.scoped(s.handleStats)))
+
+	// Sign-in.
+	m.HandleFunc("GET /login", s.handleLoginForm)
+	m.HandleFunc("POST /login", s.handleLoginRequest)
+	m.HandleFunc("GET /login/totp", s.handleTOTPForm)
+	m.HandleFunc("POST /login/totp", s.handleTOTPVerify)
+	m.HandleFunc("GET /login/{token}", s.handleLoginLink)
+	m.HandleFunc("POST /login/{token}", s.handleLoginConsume)
+	m.HandleFunc("POST /logout", s.handleLogout)
+
+	// Signed-in consoles.
+	m.HandleFunc("GET /account", s.user(s.handleAccount))
+	m.HandleFunc("GET /account/totp", s.user(s.handleTOTPSetup))
+	m.HandleFunc("POST /account/totp", s.user(s.handleTOTPEnroll))
+	m.HandleFunc("POST /account/sign-out-elsewhere", s.user(s.handleSignOutElsewhere))
+
+	m.HandleFunc("GET /admin", s.user(s.handleAdminHome))
+	m.HandleFunc("GET /admin/{client}", s.client(s.handleClientConsole))
+	m.HandleFunc("POST /admin/{client}/members", s.client(s.handleInviteMember))
+	m.HandleFunc("POST /admin/{client}/members/{user}/remove", s.client(s.handleRemoveMember))
+
+	m.HandleFunc("GET /super", s.super(s.handleSuper))
+	m.HandleFunc("POST /super/clients", s.super(s.handleSuperCreateClient))
+	m.HandleFunc("POST /super/clients/{client}/status", s.super(s.handleSuperClientStatus))
+	m.HandleFunc("POST /super/admins", s.super(s.handleSuperGrant))
+	m.HandleFunc("POST /super/admins/{user}/remove", s.super(s.handleSuperRevoke))
+	m.HandleFunc("GET /super/system", s.super(s.handleSystem))
+	m.HandleFunc("POST /super/system/emails/{id}/retry", s.super(s.handleRetryEmail))
+	m.HandleFunc("POST /super/system/suppressions", s.super(s.handleSuppress))
+	m.HandleFunc("POST /super/system/suppressions/remove", s.super(s.handleUnsuppress))
+
+	// Email provider webhook (CERTS_BOUNCE_WEBHOOK_TOKEN).
+	m.HandleFunc("POST /hooks/email/bounce", s.handleBounceWebhook)
 }
 
 // Handler returns the root handler with middleware applied.
@@ -109,6 +192,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		h.Set("X-Frame-Options", "DENY")
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "+
 				"frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
@@ -132,14 +216,19 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		if (path == "/readyz" || path == "/healthz") && rec.status == http.StatusOK {
 			return // health probes every few seconds would drown the log
 		}
+		// Never log secrets that live in paths: claim and sign-in tokens.
 		if strings.HasPrefix(path, "/claim/") {
-			path = "/claim/…" // never log claim tokens
+			path = "/claim/…"
+		} else if strings.HasPrefix(path, "/login/") && path != "/login/totp" {
+			path = "/login/…"
 		}
 		s.log.Info("http", "method", r.Method, "path", path, "status", rec.status,
 			"dur_ms", time.Since(start).Milliseconds())
 	})
 }
 
+// admin guards the JSON API with CERTS_ADMIN_TOKEN, a platform-level
+// credential for automation. Its actions are audited as "admin-token".
 func (s *Server) admin(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.AdminToken == "" {
@@ -148,6 +237,10 @@ func (s *Server) admin(h http.HandlerFunc) http.Handler {
 		}
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.AdminToken)) != 1 {
+			if !s.limits.adminToken.Allow(s.clientIP(r)) {
+				writeJSONError(w, http.StatusTooManyRequests, "too many failed attempts")
+				return
+			}
 			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
@@ -163,10 +256,22 @@ type base struct {
 	OrgBlurb string
 	SiteURL  string
 	NoIndex  bool
+	User     *store.User // set on console pages: shows the signed-in nav
+	CSRF     string
 }
 
-func (s *Server) base() base {
-	return base{Org: s.cfg.OrgName, OrgBlurb: s.cfg.OrgBlurb, SiteURL: s.cfg.SiteURL}
+// platformBase is for pages that belong to no single client (verify, errors).
+func (s *Server) platformBase() base {
+	return base{Org: s.cfg.PlatformName, SiteURL: "/"}
+}
+
+// issuerBase brands a page with the client that issued the certificate.
+func (s *Server) issuerBase(c *store.Certificate) base {
+	b := base{Org: c.Issuer.Name, OrgBlurb: c.Issuer.Blurb, SiteURL: c.Issuer.SiteURL}
+	if b.SiteURL == "" {
+		b.SiteURL = "/"
+	}
+	return b
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {
@@ -187,7 +292,7 @@ type messagePage struct {
 }
 
 func (s *Server) message(w http.ResponseWriter, status int, title, body string) {
-	p := messagePage{base: s.base(), Title: title, Body: body}
+	p := messagePage{base: s.platformBase(), Title: title, Body: body}
 	p.NoIndex = true
 	s.render(w, status, "message.html", p)
 }
@@ -223,6 +328,8 @@ func formatDate(v any) string {
 }
 
 func formatMonth(t time.Time) string { return t.Format("January 2006") }
+
+func formatDateTime(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") }
 
 var botUA = regexp.MustCompile(`(?i)bot|crawl|spider|slurp|preview|facebookexternalhit|embedly|whatsapp|curl|wget|python|go-http`)
 

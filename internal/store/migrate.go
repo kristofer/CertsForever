@@ -167,6 +167,12 @@ func (s *Store) migrate(ctx context.Context, opts Options) error {
 			tx.Rollback()
 			return fmt.Errorf("apply %s: %w", m.name, err)
 		}
+		// Table rebuilds can leave dangling references that SQLite only
+		// reports on demand; refuse to commit them.
+		if err := foreignKeyCheck(ctx, tx); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("apply %s: %w", m.name, err)
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO schema_migrations (version, checksum) VALUES (?, ?)`, m.version, m.checksum); err != nil {
 			tx.Rollback()
@@ -178,4 +184,29 @@ func (s *Store) migrate(ctx context.Context, opts Options) error {
 		s.Migration.Applied = append(s.Migration.Applied, m.version)
 	}
 	return nil
+}
+
+func foreignKeyCheck(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var problems []string
+	for rows.Next() {
+		var table, parent string
+		var rowid sql.NullInt64
+		var fkid int
+		if err := rows.Scan(&table, &rowid, &parent, &fkid); err != nil {
+			return err
+		}
+		problems = append(problems, fmt.Sprintf("%s row %d -> %s", table, rowid.Int64, parent))
+		if len(problems) == 5 {
+			break
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("foreign key violations: %s", strings.Join(problems, "; "))
+	}
+	return rows.Err()
 }
