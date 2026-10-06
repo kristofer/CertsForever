@@ -1,0 +1,13 @@
+{{define "title"}}Verify a certificate · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Verification</p>
+<h1 class="page-title">Verify a {{.Org}} certificate</h1>
+<p class="muted">Enter the credential ID shown on the certificate or LinkedIn profile.</p>
+<form class="verify" method="get" action="/verify">
+  <label for="id" class="sr-only">Credential ID</label>
+  <input id="id" name="id" value="{{.Query}}" placeholder="ZCW-7K3M9QF2XA" autocomplete="off" spellcheck="false" required>
+  <button class="btn" type="submit">Verify</button>
+</form>
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{end}}

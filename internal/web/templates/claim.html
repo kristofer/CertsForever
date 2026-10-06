@@ -1,0 +1,44 @@
+{{define "title"}}Your certificate · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Your certificate</p>
+<h1 class="page-title">Congratulations, {{.Cert.RecipientName}}.</h1>
+
+{{if .JustUpdated}}<div class="status status-ok" role="status">Saved.</div>{{end}}
+
+{{if .Cert.Revoked}}
+<div class="status status-revoked" role="status">
+  This certificate was revoked on {{date .Cert.RevokedAt}}. Contact your instructor if you think this is a mistake.
+</div>
+{{else}}
+<section class="panel">
+  <h2>{{.Cert.CourseTitle}}</h2>
+  <p class="muted">Issued {{date .Cert.IssuedOn}} · Cohort {{.Cert.CohortName}} · <code>{{.Cert.ID}}</code></p>
+
+  {{if .Cert.Public}}
+  <p>Your certificate is <strong>public</strong>. Anyone with the link can verify it:</p>
+  <p class="url-row"><a href="{{.PublicURL}}">{{.PublicURL}}</a>
+     <button class="btn btn-ghost btn-sm" type="button" data-copy="{{.PublicURL}}">Copy</button></p>
+
+  <div class="actions">
+    <a class="btn" href="{{.AddURL}}">Add to LinkedIn profile</a>
+    <a class="btn btn-ghost" href="{{.ShareURL}}">Share a post on LinkedIn</a>
+  </div>
+  <p class="hint">"Add to profile" puts it under Licenses &amp; Certifications with the credential ID and link filled in.</p>
+
+  <form method="post" class="inline-form">
+    <input type="hidden" name="visibility" value="private">
+    <button class="btn-link" type="submit">Make it private again</button>
+  </form>
+  {{else}}
+  <p>Your certificate is <strong>private</strong>. Nobody can see it until you publish it.
+     Publishing creates a public page with your name, course and completion date, so employers can verify it.</p>
+  <form method="post">
+    <input type="hidden" name="visibility" value="public">
+    <button class="btn" type="submit">Publish my certificate</button>
+  </form>
+  {{end}}
+</section>
+<p class="hint">Keep this page's link private. It's how you manage your certificate.</p>
+{{end}}
+{{end}}

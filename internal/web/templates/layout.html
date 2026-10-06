@@ -1,0 +1,26 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{block "title" .}}{{.Org}} Certificates{{end}}</title>
+{{if .NoIndex}}<meta name="robots" content="noindex">{{end}}
+{{block "meta" .}}{{end}}
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">{{.Org}}</a>
+  <span class="brand-sub">Certificates</span>
+</header>
+<main>
+{{block "content" .}}{{end}}
+</main>
+<footer class="foot">
+  <a href="/verify">Verify a certificate</a>
+  <span aria-hidden="true">·</span>
+  <a href="{{.SiteURL}}">{{.Org}}</a>
+</footer>
+<script src="/static/app.js" defer></script>
+</body>
+</html>{{end}}

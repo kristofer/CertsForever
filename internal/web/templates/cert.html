@@ -1,0 +1,58 @@
+{{define "title"}}{{.Cert.RecipientName}} · {{.Cert.CourseTitle}} · {{.Org}}{{end}}
+
+{{define "meta"}}
+<link rel="canonical" href="{{.CanonicalURL}}">
+<meta name="description" content="{{.Cert.RecipientName}} completed {{.Cert.CourseTitle}} at {{.Org}}. Credential ID {{.Cert.ID}}.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{.Org}}">
+<meta property="og:title" content="{{.Cert.RecipientName}} completed {{.Cert.CourseTitle}}">
+<meta property="og:description" content="{{if .Cert.Revoked}}This certificate has been revoked.{{else}}A verified certificate of completion from {{.Org}}.{{end}}">
+<meta property="og:url" content="{{.CanonicalURL}}">
+<meta property="og:image" content="{{.OGImageURL}}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="627">
+<meta property="og:image:alt" content="Certificate of completion for {{.Cert.RecipientName}}, {{.Cert.CourseTitle}}">
+<meta name="twitter:card" content="summary_large_image">
+{{end}}
+
+{{define "content"}}
+{{if .Cert.Revoked}}
+<div class="status status-revoked" role="status">
+  <strong>Revoked.</strong> This certificate was revoked on {{date .Cert.RevokedAt}} and is no longer valid.
+</div>
+{{else}}
+<div class="status status-ok" role="status">
+  <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M8 13.2 4.8 10l-1.1 1.1L8 15.4l8.3-8.3-1.1-1.1z" fill="currentColor"/></svg>
+  Verified certificate issued by {{.Org}}
+</div>
+{{end}}
+
+<article class="cert{{if .Cert.Revoked}} is-revoked{{end}}">
+  <p class="eyebrow">Certificate of Completion</p>
+  <h1>{{.Cert.RecipientName}}</h1>
+  <p class="lede">has successfully completed</p>
+  <h2>{{.Cert.CourseTitle}}</h2>
+  {{with .Cert.Skills}}
+  <ul class="skills" aria-label="Skills">{{range .}}<li>{{.}}</li>{{end}}</ul>
+  {{end}}
+  <dl class="facts">
+    <div><dt>Issued</dt><dd>{{date .Cert.IssuedOn}}</dd></div>
+    <div><dt>Cohort</dt><dd>{{.Cert.CohortName}}</dd></div>
+    <div><dt>Credential ID</dt><dd><code>{{.Cert.ID}}</code></dd></div>
+  </dl>
+</article>
+
+{{if not .Cert.Revoked}}
+<div class="actions">
+  <a class="btn" href="{{.ShareURL}}">Share on LinkedIn</a>
+  <button class="btn btn-ghost" type="button" data-copy="{{.CanonicalURL}}">Copy link</button>
+  <button class="btn btn-ghost" type="button" data-print>Print or save as PDF</button>
+</div>
+{{end}}
+
+<section class="about">
+  <h3>About {{.Org}}</h3>
+  <p>{{.OrgBlurb}}</p>
+  <a class="link-cta" href="{{.LearnURL}}">Learn about the program <span aria-hidden="true">→</span></a>
+</section>
+{{end}}
