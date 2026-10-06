@@ -1,0 +1,41 @@
+{{define "title"}}Certificates · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+
+<form class="filters" method="get">
+  <label>Search <input name="q" value="{{.Filter.Query}}" placeholder="Name, email or ID"></label>
+  <label>Course
+    <select name="course"><option value="">All</option>
+      {{range .Courses}}<option value="{{.Slug}}"{{if eq .Slug $.Filter.Course}} selected{{end}}>{{.Title}}</option>{{end}}
+    </select></label>
+  <label>Cohort <input name="cohort" value="{{.Filter.Cohort}}"></label>
+  <label>Status
+    <select name="status">
+      <option value="">Any</option>
+      <option value="active"{{if eq .Filter.Status "active"}} selected{{end}}>Valid</option>
+      <option value="revoked"{{if eq .Filter.Status "revoked"}} selected{{end}}>Revoked</option>
+    </select></label>
+  <label>Opened
+    <select name="claimed">
+      <option value="">Any</option>
+      <option value="yes"{{if eq .Filter.Claimed "yes"}} selected{{end}}>Opened</option>
+      <option value="no"{{if eq .Filter.Claimed "no"}} selected{{end}}>Not opened</option>
+    </select></label>
+  <button class="btn btn-sm" type="submit">Filter</button>
+</form>
+
+<section class="panel">
+  <p class="counts"><span><strong>{{.Total}}</strong> certificate{{if ne .Total 1}}s{{end}}</span>
+    <span class="push">Download: <a href="/admin/{{.Client.Slug}}/certificates/export?{{.Export}}{{if .Export}}&amp;{{end}}format=csv">CSV</a> ·
+    <a href="/admin/{{.Client.Slug}}/certificates/export?{{.Export}}{{if .Export}}&amp;{{end}}format=json">JSON</a></span></p>
+  {{template "certrows" .}}
+  {{if or .Prev .Next}}
+  <nav class="pager" aria-label="Pages">
+    {{with .Prev}}<a href="{{.}}">← Newer</a>{{end}}
+    <span class="muted">Page {{.Page}}</span>
+    {{with .Next}}<a href="{{.}}">Older →</a>{{end}}
+  </nav>
+  {{end}}
+</section>
+{{end}}

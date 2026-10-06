@@ -229,7 +229,7 @@ func (w *Worker) Chores(ctx context.Context) {
 		cl := sc.Client()
 		err = st.SendReminder(ctx, sc, d.CertificateID, func(c *store.Certificate, token string) (*store.NewEmail, error) {
 			m, err := emails.Reminder(w.Platform, emails.Client{Name: cl.Name, ReplyTo: cl.ReplyTo, SiteURL: cl.SiteURL},
-				c.Email, c.RecipientName, c.CourseTitle, w.Platform.BaseURL+"/claim/"+token)
+				c.Email, c.RecipientName, c.CourseTitle, c.PublicBase(w.Platform.BaseURL)+"/claim/"+token)
 			if err != nil {
 				return nil, err
 			}

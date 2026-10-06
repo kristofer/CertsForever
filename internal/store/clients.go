@@ -41,7 +41,27 @@ type Client struct {
 	SendReminders bool       `json:"send_reminders"` // one nudge to publish after 7 days
 	CreatedAt     time.Time  `json:"created_at"`
 	SuspendedAt   *time.Time `json:"suspended_at,omitempty"`
+	SuspendReason string     `json:"suspend_reason,omitempty"`
+	// Domain is the verified custom domain certificate links use ("" =
+	// the platform domain).
+	Domain string `json:"domain,omitempty"`
 }
+
+// PublicBase is the base URL for a client's public links: its custom
+// domain (with the platform's scheme) or else the platform's base URL.
+func PublicBase(platformBase, domain string) string {
+	if domain == "" {
+		return platformBase
+	}
+	scheme := "https"
+	if strings.HasPrefix(platformBase, "http://") {
+		scheme = "http" // development
+	}
+	return scheme + "://" + domain
+}
+
+// PublicBase is the base URL for this client's public links.
+func (c *Client) PublicBase(platformBase string) string { return PublicBase(platformBase, c.Domain) }
 
 // Active reports whether the client may issue certificates.
 func (c *Client) Active() bool { return c.Status == "active" }
@@ -209,14 +229,7 @@ func (s *Store) UpdateClient(ctx context.Context, in ClientInput) (*Client, erro
 // SetClientStatus suspends or reactivates a client. Suspended clients
 // cannot issue, but their public certificates keep resolving.
 func (s *Store) SetClientStatus(ctx context.Context, slug, status string) error {
-	if status != "active" && status != "suspended" {
-		return fmt.Errorf("%w: status must be active or suspended", ErrInvalid)
-	}
-	res, err := s.wdb.ExecContext(ctx, `
-		UPDATE clients
-		SET status = ?, suspended_at = CASE WHEN ? = 'suspended' THEN ? ELSE NULL END
-		WHERE slug = ?`, status, status, nowUTC(), slug)
-	return affectedOne(res, err)
+	return s.SetClientStatusReason(ctx, slug, status, "")
 }
 
 // GetClient looks up a client by slug.
@@ -243,7 +256,9 @@ func (s *Store) ListClients(ctx context.Context) ([]Client, error) {
 }
 
 const clientSelect = `SELECT id, slug, name, id_prefix, status, site_url, blurb, linkedin_org_id,
-	reply_to, send_reminders, created_at, suspended_at FROM clients`
+	reply_to, send_reminders, created_at, suspended_at, suspend_reason,
+	COALESCE((SELECT d.host FROM client_domains d WHERE d.client_id = clients.id AND d.is_canonical = 1), '')
+	FROM clients`
 
 func (s *Store) getClient(ctx context.Context, where string, arg any) (*Client, error) {
 	return scanClient(s.rdb.QueryRowContext(ctx, clientSelect+` WHERE `+where, arg))
@@ -254,7 +269,7 @@ func scanClient(r rowScanner) (*Client, error) {
 	var created string
 	var suspended sql.NullString
 	err := r.Scan(&c.ID, &c.Slug, &c.Name, &c.IDPrefix, &c.Status, &c.SiteURL, &c.Blurb,
-		&c.LinkedInOrgID, &c.ReplyTo, &c.SendReminders, &created, &suspended)
+		&c.LinkedInOrgID, &c.ReplyTo, &c.SendReminders, &created, &suspended, &c.SuspendReason, &c.Domain)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

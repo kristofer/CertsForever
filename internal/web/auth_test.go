@@ -405,19 +405,61 @@ func TestSuperAdminNeedsTwoStepVerification(t *testing.T) {
 func TestSuperAdminActingInAClientIsAudited(t *testing.T) {
 	h := newHarness(t)
 	h.seedPlatform()
+	ctx := context.Background()
+	twa, _ := h.st.Scope(ctx, "twa")
 	b := h.browser()
 	b.signIn("root@platform.example")
 	b.enrollTOTP()
 
-	resp, page := b.get("/admin/twa")
-	if resp.StatusCode != 200 || !strings.Contains(page, "as a platform administrator") {
-		t.Fatalf("super in TWA console: %d", resp.StatusCode)
+	// Not a member: the console asks first, and refuses changes until then.
+	resp, page := b.get("/admin/twa/courses")
+	if resp.StatusCode != 200 || !strings.Contains(page, "Act as TwinArrows?") || strings.Contains(page, "Add a course") {
+		t.Fatalf("super in TWA console before acting: %d", resp.StatusCode)
+	}
+	if resp, _ := b.post("/admin/twa/members", url.Values{"email": {"sneaky@twa.example"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("change before acting: %d", resp.StatusCode)
+	}
+	// Choosing to act is recorded, and returns to the page asked for.
+	resp, _ = b.post("/super/clients/twa/act-as", url.Values{"return": {"/admin/twa/courses"}})
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/admin/twa/courses?notice=acting" {
+		t.Fatalf("act as: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	resp, page = b.get("/admin/twa/team")
+	if resp.StatusCode != 200 || !strings.Contains(page, "acting as <strong>TwinArrows</strong>") {
+		t.Fatalf("banner missing: %d", resp.StatusCode)
 	}
 	b.post("/admin/twa/members", url.Values{"email": {"first@twa.example"}})
-	twa, _ := h.st.Scope(context.Background(), "twa")
-	log, _ := h.st.ListAudit(context.Background(), twa, 5)
-	if len(log) == 0 || log[0].Action != "member.invite" || !log[0].Impersonated || log[0].Actor != "root@platform.example" {
-		t.Fatalf("impersonated action not flagged: %+v", log)
+	log, _ := h.st.ListAudit(ctx, twa, 5)
+	if len(log) < 2 || log[0].Action != "member.invite" || !log[0].Impersonated || log[0].Actor != "root@platform.example" ||
+		log[1].Action != "client.act_as" || !log[1].Impersonated {
+		t.Fatalf("impersonated actions not flagged: %+v", log)
+	}
+	// Platform admins can't mint API tokens for a client.
+	b.get("/admin/twa/tokens")
+	if resp, _ := b.post("/admin/twa/tokens", url.Values{"name": {"mine"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("token while acting: %d", resp.StatusCode)
+	}
+	// The return path can't leave the client's console.
+	for _, bad := range []string{"https://evil.example/", "//evil.example/admin/twa", "/admin/zcw", "/admin/twain"} {
+		resp, _ := b.post("/super/clients/twa/act-as", url.Values{"return": {bad}})
+		if loc := resp.Header.Get("Location"); loc != "/admin/twa?notice=acting" {
+			t.Errorf("return %q went to %q", bad, loc)
+		}
+	}
+	// Stopping is recorded, and the console asks again.
+	if resp, _ := b.post("/super/act-as/stop", nil); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("stop: %d", resp.StatusCode)
+	}
+	if _, page := b.get("/admin/twa"); !strings.Contains(page, "Act as TwinArrows?") {
+		t.Fatal("still acting after stop")
+	}
+	if log, _ := h.st.ListAudit(ctx, twa, 1); log[0].Action != "client.act_as_end" {
+		t.Fatalf("stop not audited: %+v", log[0])
+	}
+	// Acting as one client doesn't open another.
+	b.post("/super/clients/twa/act-as", nil)
+	if _, page := b.get("/admin/zcw"); !strings.Contains(page, "Act as Zip Code Wilmington?") || !strings.Contains(page, "stops you acting as TwinArrows") {
+		t.Fatal("acting leaked to another client")
 	}
 }
 

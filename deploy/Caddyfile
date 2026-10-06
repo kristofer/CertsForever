@@ -1,9 +1,34 @@
 # Used by `docker compose --profile tls`. CERTS_DOMAIN comes from .env.
-{$CERTS_DOMAIN} {
+{
+	# Client custom domains (Milestone 6) get certificates on their first
+	# request, but only if CertsForever says the domain is a verified client
+	# domain. Without this check anyone could point DNS at the server and make
+	# Caddy request certificates for arbitrary names.
+	on_demand_tls {
+		ask http://certsforever:8080/internal/tls-ask
+	}
+}
+
+(certsforever) {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy certsforever:8080 {
 		# Ride out the ~1s restart during deploys.
 		lb_try_duration 10s
 	}
+}
+
+# The platform domain: consoles, sign-in, APIs and certificates.
+{$CERTS_DOMAIN} {
+	import certsforever
+}
+
+# Client custom domains, e.g. certs.zipcodewilmington.com (a CNAME to
+# CERTS_DOMAIN). CertsForever serves only certificate pages on them and
+# redirects everything else to the platform domain.
+https:// {
+	tls {
+		on_demand
+	}
+	import certsforever
 }

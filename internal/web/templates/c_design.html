@@ -1,0 +1,74 @@
+{{define "title"}}{{if .Design.ID}}{{.Design.Name}}{{else}}New design{{end}} · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+<p><a href="/admin/{{.Client.Slug}}/designs">← Designs</a></p>
+
+{{if .Design.ID}}
+<section class="panel">
+  <h2>Preview</h2>
+  <img class="og-preview" src="/admin/{{.Client.Slug}}/designs/{{.Design.ID}}/preview.png" alt="How the certificate looks when shared on LinkedIn" width="600" height="314">
+  <p><a href="/admin/{{.Client.Slug}}/designs/{{.Design.ID}}/preview">See the certificate page →</a> <span class="hint">The image above is what LinkedIn shows when it's shared.</span></p>
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>{{if .Design.ID}}Edit design{{else}}New design{{end}}</h2>
+  <form class="stack" method="post" action="/admin/{{.Client.Slug}}/designs{{if .Design.ID}}/{{.Design.ID}}{{end}}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Design name <span class="hint">for you, e.g. "Bootcamp"</span>
+      <input name="name" value="{{.Design.Name}}" required maxlength="80"></label>
+    <label>Heading <input name="heading" value="{{.Design.Heading}}" required maxlength="60"></label>
+    <label>Wording under the name <input name="body_text" value="{{.Design.BodyText}}" maxlength="100"></label>
+    <label>Accent color <input name="accent_color" type="color" value="{{.Design.AccentColor}}"></label>
+
+    <fieldset>
+      <legend>Logo</legend>
+      {{with .Design.LogoAssetID}}<img class="asset-thumb" src="{{asset .}}" alt="Current logo">
+      <label class="check"><input type="checkbox" name="remove_logo"> Remove logo</label>{{end}}
+      <label>{{if .Design.LogoAssetID}}Replace with{{else}}Upload{{end}} <span class="hint">PNG or JPEG, up to 2 MB; a transparent PNG looks best</span>
+        <input type="file" name="logo" accept="image/png,image/jpeg"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Signatures <span class="hint">optional, up to two</span></legend>
+      <div class="sig-grid">
+      {{with index .Sigs 0}}
+        <div>
+          <label>Name <input name="sig1_name" value="{{.Name}}" maxlength="60"></label>
+          <label>Title <input name="sig1_title" value="{{.Title}}" maxlength="60" placeholder="e.g. Lead Instructor"></label>
+          {{with .SignatureAssetID}}<img class="asset-thumb" src="{{asset .}}" alt="Current signature">
+          <label class="check"><input type="checkbox" name="sig1_remove"> Remove signature image</label>{{end}}
+          <label>Signature image <span class="hint">a photo or scan on white paper works</span><input type="file" name="sig1_file" accept="image/png,image/jpeg"></label>
+        </div>
+      {{end}}
+      {{with index .Sigs 1}}
+        <div>
+          <label>Name <input name="sig2_name" value="{{.Name}}" maxlength="60"></label>
+          <label>Title <input name="sig2_title" value="{{.Title}}" maxlength="60"></label>
+          {{with .SignatureAssetID}}<img class="asset-thumb" src="{{asset .}}" alt="Current signature">
+          <label class="check"><input type="checkbox" name="sig2_remove"> Remove signature image</label>{{end}}
+          <label>Signature image <input type="file" name="sig2_file" accept="image/png,image/jpeg"></label>
+        </div>
+      {{end}}
+      </div>
+    </fieldset>
+    <p class="hint">Changes apply to certificates issued from now on. Certificates already issued keep the look they were issued with.</p>
+    <div><button class="btn" type="submit">Save design</button></div>
+  </form>
+</section>
+
+{{if .Design.ID}}
+<section class="panel panel-danger">
+  <h2>Delete</h2>
+  {{if .Design.Courses}}<p class="muted">{{.Design.Courses}} course{{if ne .Design.Courses 1}}s use{{else}} uses{{end}} this design. Choose another design for {{if ne .Design.Courses 1}}them{{else}}it{{end}} before deleting.</p>
+  {{else}}
+  <form method="post" action="/admin/{{.Client.Slug}}/designs/{{.Design.ID}}/delete">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button class="btn btn-danger" type="submit">Delete design</button>
+    <span class="hint">Issued certificates keep their look.</span>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{end}}

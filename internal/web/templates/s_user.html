@@ -1,0 +1,49 @@
+{{define "title"}}{{.U.Email}} · {{.Org}}{{end}}
+
+{{define "content"}}
+{{template "superhead" .}}
+<p><a href="/super/users">← People</a></p>
+
+<section class="panel">
+  <h2>{{.U.DisplayName}}{{if .U.IsSuper}} <span class="pill pill-ok">platform administrator</span>{{end}}{{if .U.Disabled}} <span class="tag">disabled</span>{{end}}</h2>
+  <dl class="kv">
+    <dt>Email</dt><dd>{{.U.Email}}</dd>
+    <dt>Two-step sign-in</dt><dd>{{if .U.TOTPEnabled}}on{{else}}off{{end}}</dd>
+    <dt>Signed in</dt><dd>{{with .U.LastLoginAt}}{{datetime .}}{{else}}never{{end}} · {{.Sessions}} active session{{if ne .Sessions 1}}s{{end}}</dd>
+    <dt>Added</dt><dd>{{date .U.CreatedAt}}</dd>
+    <dt>Administers</dt><dd>{{range $i, $c := .Clients}}{{if $i}}, {{end}}<a href="/super/clients/{{$c.Slug}}">{{$c.Name}}</a>{{else}}<span class="muted">no clients</span>{{end}}</dd>
+  </dl>
+</section>
+
+{{if .Self}}
+<section class="panel"><p class="muted">This is you. Manage your own sign-in on <a href="/account">your account page</a>; another platform administrator can change your access.</p></section>
+{{else}}
+<section class="panel">
+  <h2>Access</h2>
+  <div class="action-list">
+    {{if .U.Disabled}}
+    {{template "useraction" (dict "P" . "Action" "enable" "Label" "Enable" "Hint" "They can sign in again.")}}
+    {{else}}
+    {{template "useraction" (dict "P" . "Action" "sign-out" "Label" "Sign out everywhere" "Hint" "Ends their sessions; they can sign in again.")}}
+    {{if .U.TOTPEnabled}}{{template "useraction" (dict "P" . "Action" "reset-2fa" "Label" "Reset two-step sign-in" "Hint" "For a lost phone. Ends their sessions; they set it up again at next sign-in.")}}{{end}}
+    {{if .U.IsSuper}}{{template "useraction" (dict "P" . "Action" "revoke-super" "Label" "Remove platform administrator" "Hint" "They keep any client access they have.")}}
+    {{else}}{{template "useraction" (dict "P" . "Action" "grant-super" "Label" "Make platform administrator" "Hint" "Full access to every client. They'll have to set up two-step sign-in.")}}{{end}}
+    {{template "useraction" (dict "P" . "Action" "disable" "Label" "Disable" "Hint" "Signs them out everywhere and voids their unused sign-in links. For someone who has left, or a compromised account." "Danger" true)}}
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>Their recent actions</h2>
+  {{template "audit" .Audit}}
+</section>
+{{end}}
+
+{{define "useraction"}}
+<form method="post" action="/super/users/{{.P.U.ID}}/{{.Action}}" class="action-row">
+  <input type="hidden" name="csrf" value="{{.P.CSRF}}">
+  <button class="btn btn-sm{{if .Danger}} btn-danger{{else}} btn-ghost{{end}}" type="submit">{{.Label}}</button>
+  <span class="hint">{{.Hint}}</span>
+</form>
+{{end}}

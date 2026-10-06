@@ -185,10 +185,34 @@ func TestRemindersAreQueuedOnceWithAWorkingLink(t *testing.T) {
 	if m.FromName != name || m.ReplyTo != reply || !strings.Contains(m.Subject, "Java Developer") {
 		t.Fatalf("reminder: %+v", m)
 	}
+	if !strings.Contains(m.Text, "https://certs.example.test/claim/") {
+		t.Fatalf("reminder link not on the platform host:\n%s", m.Text)
+	}
 	i := strings.Index(m.Text, "/claim/")
 	token := strings.Fields(m.Text[i+len("/claim/"):])[0]
 	if c, err := f.st.GetCertificateByClaimToken(ctx, token); err != nil || c.RecipientName != "Ada Lovelace" {
 		t.Fatalf("reminder link doesn't work: %v", err)
+	}
+}
+
+func TestReminderUsesClientDomain(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	name, prefix := "Zip Code Wilmington", "ZCW"
+	f.st.CreateClient(ctx, store.ClientInput{Slug: "zcw", Name: &name, IDPrefix: &prefix})
+	sc, _ := f.st.Scope(ctx, "zcw")
+	d, _ := f.st.AddDomain(ctx, sc, "certs.zcw.example")
+	f.st.MarkDomainVerified(ctx, sc, d.ID, "manual")
+	f.st.SetCanonicalDomain(ctx, sc, d.ID)
+	f.st.CreateCourse(ctx, sc, store.Course{Slug: "java", Title: "Java Developer"})
+	f.st.Issue(ctx, sc, []store.IssueRequest{{Email: "ada@example.com", FullName: "Ada", CourseSlug: "java",
+		Cohort: "J1", CompletedOn: time.Now()}})
+	restore := store.SetClockForTest(func() time.Time { return time.Now().Add(8 * 24 * time.Hour) })
+	defer restore()
+	f.w.Chores(ctx)
+	f.w.Drain(ctx)
+	if len(f.sender.sent) != 1 || !strings.Contains(f.sender.sent[0].Text, "https://certs.zcw.example/claim/") {
+		t.Fatalf("reminder link isn't on the client's domain: %+v", f.sender.sent)
 	}
 }
 

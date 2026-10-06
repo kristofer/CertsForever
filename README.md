@@ -39,10 +39,10 @@ URL to see what a student sees.
 
 People manage CertsForever in the browser. There are two roles:
 
-- **Platform administrators** run the whole service. They create and suspend
-  clients, add other platform administrators, and can open any client's
-  console. When they do, the page says so and the audit log marks their
-  actions `platform`.
+- **Platform administrators** run the whole service: clients, people,
+  custom domains, the audit log and system health. They can act as any
+  client to help it. That's a deliberate step: a banner shows until they
+  stop, and the client's audit log records everything they do.
 - **Client administrators** manage only the clients they've been invited to.
   To them, other clients look as if they don't exist.
 
@@ -59,8 +59,14 @@ certsforever superadmin add you@example.org -name "Your Name"
 ```
 
 From there, everything is in the browser:
-- `/super`: create clients (optionally inviting each one's first admin), and add platform admins.
-- `/admin/{client}`: a client's administrators (invite and remove), its courses, recent certificates, and audit log.
+- `/super`: the platform console.
+  - **Clients:** create (optionally inviting the first admin), edit, suspend
+    with a reason, manage admins and custom domains, and act as a client.
+  - **People:** disable, reset two-step, sign out everywhere, and platform
+    admin rights.
+  - **Audit log:** filterable.
+  - **System:** database, migrations, snapshots and the email queue.
+- `/admin/{client}`: the client console (see below).
 - `/account`: two-step setup, and signing out other devices.
 
 Other commands:
@@ -89,11 +95,52 @@ certsforever client add -slug zcw -name "Zip Code Wilmington" -prefix ZCW \
   -blurb "Zip Code Wilmington is a nonprofit coding bootcamp in Wilmington, Delaware."
 certsforever client list
 certsforever client update -slug zcw -linkedin-org 7654321   # only the flags given change
-certsforever client suspend -slug zcw                       # can't issue; certificates still resolve
+certsforever client suspend -slug zcw -reason "…"           # can't issue; certificates still resolve
 ```
 
 The prefix is part of every certificate URL, so it can't change once the
 client has issued a certificate.
+
+## Custom domains
+
+A client can have its certificates on its own domain, e.g.
+`certs.zipcodewilmington.com`:
+
+1. The client adds a CNAME pointing it at the platform domain.
+2. A platform admin verifies it on the client's page.
+3. The admin chooses *Use for links*.
+
+From then on, every certificate link uses that domain, and certificate URLs
+on the platform domain answer with a 301 there, so links already on LinkedIn
+keep working. Only public pages are served on a client's domain. Sign-in and
+the consoles stay on the platform domain.
+
+With `docker compose --profile tls`, Caddy gets TLS certificates for client
+domains on their first request. It asks CertsForever first, so only verified
+domains get one. See `deploy/Caddyfile` and runbook §7a.
+
+## The client console
+
+Client admins work in the browser at `/admin/{client}`, with no terminal:
+
+- **Overview:** issued, opened and public rates, page views and visits to
+  your site, plus recent activity.
+- **Issue:** upload a CSV. A dry run marks every row (new, already issued,
+  repeated, error) before anything is issued, and students can be emailed in
+  the same step.
+- **Certificates:** search and filter. Each certificate has a name
+  correction (in place, so the link stays valid), a new-link email, revoke,
+  and its email and audit history. Export to CSV or JSON.
+- **Cohorts:** roster with who has opened their certificate; remind those
+  who haven't.
+- **Courses and Designs:** each course picks a design (heading, wording,
+  accent color, logo, up to two signatures) with a live preview of the page
+  and the LinkedIn share image. Certificates keep the design they were issued
+  with.
+- **Team, Settings, API:** invite admins and read the audit log; set the
+  site, blurb, LinkedIn ID, reply-to and reminders; create API tokens.
+
+The CLI below does the same jobs for operators and scripts.
 
 ## Issuing certificates to a cohort
 
@@ -206,6 +253,23 @@ curl -H "$H" -X POST "$API/clients/twa/certificates/TWA-XXXXXXXXXX/claim-link?no
 curl -H "$H" $API/clients/twa/stats
 ```
 
+## Client API
+
+Each client can create its own tokens on its API page, so an LMS or script
+can issue certificates for that client and nothing else. The token decides
+the client, so there's no client in the path, and actions are audited as
+`api-token:<name>`.
+
+```sh
+H="Authorization: Bearer cfk_…"
+curl -H "$H" -H 'Content-Type: text/csv' --data-binary @cohort.csv "https://certs.example.org/api/v1/import?notify=true"
+curl -H "$H" "https://certs.example.org/api/v1/certificates?cohort=Spring%202026&claimed=no"
+curl -H "$H" -X POST https://certs.example.org/api/v1/certificates/ZCW-XXXXXXXXXX/revoke -d '{"reason":"issued in error"}'
+```
+
+Also available: `GET /api/v1/certificates/{id}`, `POST …/{id}/claim-link`,
+`GET`/`POST /api/v1/courses`, and `GET /api/v1/stats`.
+
 ## Layout
 
 ```
@@ -214,7 +278,8 @@ internal/config/         env config, validation, *_FILE secrets
 internal/buildinfo/      version stamped at build time
 internal/store/          SQLite: writer/reader pools, checksummed migrations, backup/restore
 internal/web/            handlers, templates, static assets (embedded)
-internal/ogimage/        1200x627 share image (pure Go, bundled Go fonts)
+internal/ogimage/        1200x627 share image (pure Go, bundled Go fonts), in each certificate's design
+internal/imgnorm/        logo/signature uploads: PNG/JPEG only, size limits, re-encoded to PNG
 internal/linkedin/       Add-to-profile and share URL builders
 internal/certid/         certificate ID generation/normalization
 internal/importer/       cohort CSV parsing

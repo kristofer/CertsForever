@@ -1,0 +1,21 @@
+{{define "title"}}Act as {{.Client.Name}} · {{.Org}}{{end}}
+
+{{define "content"}}
+<p class="eyebrow">Platform administration</p>
+<h1 class="page-title">Act as {{.Client.Name}}?</h1>
+<section class="panel">
+  <p>You aren't an administrator of {{.Client.Name}}. As a platform administrator you can act as it, to help or to fix something.</p>
+  <ul>
+    <li>Every page will show a banner while you're acting.</li>
+    <li>Starting, stopping and everything you do are recorded in {{.Client.Name}}'s audit log, which its administrators can read.</li>
+    <li>You can revoke its API tokens but not create them.</li>
+  </ul>
+  {{with .Other}}<p class="hint">This stops you acting as {{.}}.</p>{{end}}
+  <form method="post" action="/super/clients/{{.Client.Slug}}/act-as" class="actions">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="return" value="{{.Return}}">
+    <button class="btn" type="submit">Act as {{.Client.Name}}</button>
+    <a class="btn btn-ghost" href="/super/clients/{{.Client.Slug}}">Back to the client's details</a>
+  </form>
+</section>
+{{end}}

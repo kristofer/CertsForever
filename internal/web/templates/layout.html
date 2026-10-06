@@ -6,6 +6,7 @@
 <title>{{block "title" .}}{{.Org}} Certificates{{end}}</title>
 {{if .NoIndex}}<meta name="robots" content="noindex">{{end}}
 {{block "meta" .}}{{end}}
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -15,7 +16,7 @@
   {{with .User}}
   <nav class="usernav" aria-label="Account">
     <a href="/admin">Clients</a>
-    {{if .IsSuper}}<a href="/super">Platform</a><a href="/super/system">System</a>{{end}}
+    {{if .IsSuper}}<a href="/super">Platform</a>{{end}}
     <a href="/account">{{.DisplayName}}</a>
     <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Sign out</button></form>
   </nav>

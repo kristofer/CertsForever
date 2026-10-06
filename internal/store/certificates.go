@@ -20,6 +20,7 @@ type Issuer struct {
 	Blurb         string `json:"-"`
 	LinkedInOrgID string `json:"-"`
 	Status        string `json:"-"`
+	Domain        string `json:"-"` // canonical custom domain, if any
 }
 
 // Certificate is an issued credential, joined with the data needed to render it.
@@ -44,10 +45,18 @@ type Certificate struct {
 	// EmailBlocked: the student's address is on the suppression list
 	// (bounced or complained), so no email reaches them.
 	EmailBlocked bool `json:"email_blocked,omitempty"`
+	// Design is how the certificate looked when issued.
+	Design          DesignSnapshot `json:"-"`
+	NameCorrectedAt *time.Time     `json:"name_corrected_at,omitempty"`
 }
 
 // Public reports whether the student has made the certificate public.
 func (c *Certificate) Public() bool { return c.Visibility == "public" }
+
+// PublicBase is the base URL for this certificate's links.
+func (c *Certificate) PublicBase(platformBase string) string {
+	return PublicBase(platformBase, c.Issuer.Domain)
+}
 
 // Revoked reports whether the certificate has been revoked.
 func (c *Certificate) Revoked() bool { return c.Status == "revoked" }
@@ -57,7 +66,9 @@ SELECT c.id, c.client_id, cl.slug, cl.name, cl.site_url, cl.blurb, cl.linkedin_o
        c.student_id, s.email, c.recipient_name, c.course_title, co.slug, h.name,
        c.skills, c.issued_on, c.status, c.revoked_at, COALESCE(c.revoke_reason, ''),
        c.visibility, c.claimed_at, c.created_at,
-       EXISTS (SELECT 1 FROM email_suppressions es WHERE es.email = s.email)
+       EXISTS (SELECT 1 FROM email_suppressions es WHERE es.email = s.email),
+       c.design_snapshot, c.name_corrected_at,
+       COALESCE((SELECT d.host FROM client_domains d WHERE d.client_id = c.client_id AND d.is_canonical = 1), '')
 FROM certificates c
 JOIN clients  cl ON cl.id = c.client_id
 JOIN students s  ON s.id  = c.student_id
@@ -69,12 +80,12 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanCert(r rowScanner) (*Certificate, error) {
 	var c Certificate
 	var skills, issued, created string
-	var revokedAt, claimedAt sql.NullString
+	var revokedAt, claimedAt, snap, corrected sql.NullString
 	err := r.Scan(&c.ID, &c.ClientID, &c.Issuer.Slug, &c.Issuer.Name, &c.Issuer.SiteURL, &c.Issuer.Blurb,
 		&c.Issuer.LinkedInOrgID, &c.Issuer.Status,
 		&c.StudentID, &c.Email, &c.RecipientName, &c.CourseTitle, &c.CourseSlug,
 		&c.CohortName, &skills, &issued, &c.Status, &revokedAt, &c.RevokeReason,
-		&c.Visibility, &claimedAt, &created, &c.EmailBlocked)
+		&c.Visibility, &claimedAt, &created, &c.EmailBlocked, &snap, &corrected, &c.Issuer.Domain)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -90,6 +101,8 @@ func scanCert(r rowScanner) (*Certificate, error) {
 	}
 	c.RevokedAt = parseTime(revokedAt)
 	c.ClaimedAt = parseTime(claimedAt)
+	c.NameCorrectedAt = parseTime(corrected)
+	c.Design = parseSnapshot(snap)
 	return &c, nil
 }
 
@@ -266,6 +279,7 @@ func (s *Store) IssueAndNotify(ctx context.Context, sc Scope, reqs []IssueReques
 		id     int64
 		title  string
 		skills string
+		design string
 	}
 	courses := map[string]courseSnap{}
 	results := make([]IssueResult, 0, len(reqs))
@@ -288,6 +302,9 @@ func (s *Store) IssueAndNotify(ctx context.Context, sc Scope, reqs []IssueReques
 				return nil, fmt.Errorf("%w: row %d: unknown course %q (create it first)", ErrInvalid, i+1, slug)
 			}
 			if err != nil {
+				return nil, err
+			}
+			if cs.design, err = snapshotFor(ctx, tx, cs.id); err != nil {
 				return nil, err
 			}
 			courses[slug] = cs
@@ -323,10 +340,10 @@ func (s *Store) IssueAndNotify(ctx context.Context, sc Scope, reqs []IssueReques
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO certificates
 					(id, client_id, student_id, course_id, cohort_id, recipient_name, course_title,
-					 skills, issued_on, claim_token_hash)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					 skills, issued_on, claim_token_hash, design_snapshot)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				res.CertificateID, clientID, studentID, cs.id, cohortID, name, cs.title, cs.skills,
-				r.CompletedOn.Format(dateLayout), hash); err != nil {
+				r.CompletedOn.Format(dateLayout), hash, cs.design); err != nil {
 				return nil, fmt.Errorf("row %d: insert certificate: %w", i+1, err)
 			}
 			if notify != nil {

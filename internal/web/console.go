@@ -6,15 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"certsforever/internal/emails"
 	"certsforever/internal/store"
 )
 
-// Console pages for signed-in admins. Milestone 2 covers who can get in and
-// who can manage whom; the issuing, design and settings screens come in
-// Milestones 4 and 5.
+// Console pages for signed-in admins: account, the admin home, team
+// membership and the super console. The client console's working pages
+// (issuing, certificates, designs, settings, tokens) are in console_client.go.
 
 func encodeSealed(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 func decodeSealed(s string) ([]byte, error) {
@@ -106,69 +105,36 @@ func (s *Server) handleAdminHome(w http.ResponseWriter, r *http.Request, a *auth
 	s.render(w, http.StatusOK, "admin_home.html", adminHomePage{base: s.consoleBase(a), Clients: clients})
 }
 
-type clientPage struct {
-	base
-	Client        store.Client
-	Impersonating bool
-	Notice        string
-	Error         string
-	Courses       []store.Course
-	Certificates  []store.Certificate
-	Members       []store.Member
-	Audit         []store.AuditEntry
-}
-
-func (s *Server) handleClientConsole(w http.ResponseWriter, r *http.Request, a *auth, sc store.Scope) {
-	s.renderClient(w, r, a, sc, "", http.StatusOK)
-}
-
-func (s *Server) renderClient(w http.ResponseWriter, r *http.Request, a *auth, sc store.Scope, errMsg string, status int) {
-	ctx := r.Context()
-	p := clientPage{base: s.consoleBase(a), Client: sc.Client(), Impersonating: a.impersonating,
-		Notice: notice(r), Error: errMsg}
-	var err error
-	if p.Courses, err = s.store.ListCourses(ctx, sc); err == nil {
-		if p.Certificates, err = s.store.ListCertificates(ctx, sc, "", ""); err == nil {
-			if p.Members, err = s.store.ListMembers(ctx, sc); err == nil {
-				p.Audit, err = s.store.ListAudit(ctx, sc, 30)
-			}
-		}
-	}
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	if len(p.Certificates) > 20 {
-		p.Certificates = p.Certificates[:20]
-	}
-	s.render(w, status, "client.html", p)
-}
-
 // handleInviteMember adds a client admin and emails them a sign-in link.
 func (s *Server) handleInviteMember(w http.ResponseWriter, r *http.Request, a *auth, sc store.Scope) {
-	u, _, err := s.store.EnsureUser(r.Context(), r.FormValue("email"), r.FormValue("name"))
+	c := sc.Client()
+	code, err := s.inviteAdmin(r, a, sc, r.FormValue("email"), r.FormValue("name"),
+		fmt.Sprintf("You've been invited to manage %s certificates", c.Name),
+		fmt.Sprintf("%s added you as an administrator for %s on %s.", a.user.DisplayName(), c.Name, s.cfg.PlatformName))
 	if errors.Is(err, store.ErrInvalid) {
-		s.renderClient(w, r, a, sc, "Enter a valid email address.", http.StatusBadRequest)
+		s.renderTeam(w, r, a, sc, "Enter a valid email address.", http.StatusBadRequest)
 		return
 	}
 	if err != nil {
 		s.serverError(w, err)
 		return
+	}
+	redirectNotice(w, r, "/admin/"+c.Slug+"/team", code)
+}
+
+// inviteAdmin makes email an admin of the client, audits it, and emails an
+// invitation. It returns the notice code describing what was sent.
+func (s *Server) inviteAdmin(r *http.Request, a *auth, sc store.Scope, email, name, subject, intro string) (string, error) {
+	u, _, err := s.store.EnsureUser(r.Context(), email, name)
+	if err != nil {
+		return "", err
 	}
 	actor := a.user.ID
 	if err := s.store.AddMember(r.Context(), sc, u.ID, &actor); err != nil {
-		s.serverError(w, err)
-		return
+		return "", err
 	}
 	s.audit(r, a, sc, "member.invite", "user", u.Email, nil)
-	c := sc.Client()
-	code, err := s.sendInvite(r, u, fmt.Sprintf("You've been invited to manage %s certificates", c.Name),
-		fmt.Sprintf("%s added you as an administrator for %s on %s.", a.user.DisplayName(), c.Name, s.cfg.PlatformName))
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	redirectNotice(w, r, "/admin/"+c.Slug, code)
+	return s.sendInvite(r, u, subject, intro)
 }
 
 // sendInvite emails an invitation link (valid for a week). The link is never
@@ -214,152 +180,5 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, a *a
 		return
 	}
 	s.audit(r, a, sc, "member.remove", "user", u.Email, nil)
-	redirectNotice(w, r, "/admin/"+sc.Client().Slug, "removed")
-}
-
-// --- super admin ------------------------------------------------------------
-
-type superPage struct {
-	base
-	Notice  string
-	Error   string
-	Clients []store.Client
-	Supers  []store.User
-	Audit   []store.AuditEntry
-}
-
-func (s *Server) handleSuper(w http.ResponseWriter, r *http.Request, a *auth) {
-	s.renderSuper(w, r, a, "", http.StatusOK)
-}
-
-func (s *Server) renderSuper(w http.ResponseWriter, r *http.Request, a *auth, errMsg string, status int) {
-	p := superPage{base: s.consoleBase(a), Notice: notice(r), Error: errMsg}
-	var err error
-	if p.Clients, err = s.store.ListClients(r.Context()); err == nil {
-		if p.Supers, err = s.store.ListSuperAdmins(r.Context()); err == nil {
-			p.Audit, err = s.store.ListAllAudit(r.Context(), 50)
-		}
-	}
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.render(w, status, "super.html", p)
-}
-
-func optional(v string) *string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
-func (s *Server) handleSuperCreateClient(w http.ResponseWriter, r *http.Request, a *auth) {
-	name, prefix := r.FormValue("name"), r.FormValue("id_prefix")
-	c, err := s.store.CreateClient(r.Context(), store.ClientInput{
-		Slug: r.FormValue("slug"), Name: &name, IDPrefix: &prefix,
-		SiteURL: optional(r.FormValue("site_url")), LinkedInOrgID: optional(r.FormValue("linkedin_org_id")),
-	})
-	if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrConflict) {
-		s.renderSuper(w, r, a, strings.TrimPrefix(strings.TrimPrefix(err.Error(), "invalid: "), "conflict: "), http.StatusBadRequest)
-		return
-	}
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	sc, err := s.store.Scope(r.Context(), c.Slug)
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.audit(r, a, sc, "client.create", "client", c.Slug, map[string]any{"name": c.Name, "id_prefix": c.IDPrefix})
-
-	code := "created"
-	if email := strings.TrimSpace(r.FormValue("admin_email")); email != "" {
-		u, _, err := s.store.EnsureUser(r.Context(), email, "")
-		if err != nil {
-			s.renderSuper(w, r, a, "Client created, but the first admin's email isn't valid. Invite them from the client's page.", http.StatusBadRequest)
-			return
-		}
-		actor := a.user.ID
-		if err := s.store.AddMember(r.Context(), sc, u.ID, &actor); err != nil {
-			s.serverError(w, err)
-			return
-		}
-		s.audit(r, a, sc, "member.invite", "user", u.Email, nil)
-		if code, err = s.sendInvite(r, u, fmt.Sprintf("Your %s certificates are ready to set up", c.Name),
-			fmt.Sprintf("%s set up %s on %s and made you its administrator.", a.user.DisplayName(), c.Name, s.cfg.PlatformName)); err != nil {
-			s.serverError(w, err)
-			return
-		}
-	}
-	redirectNotice(w, r, "/super", code)
-}
-
-func (s *Server) handleSuperClientStatus(w http.ResponseWriter, r *http.Request, a *auth) {
-	slug, status := r.PathValue("client"), r.FormValue("status")
-	if err := s.store.SetClientStatus(r.Context(), slug, status); err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
-			s.renderSuper(w, r, a, "Couldn't change that client's status.", http.StatusBadRequest)
-			return
-		}
-		s.serverError(w, err)
-		return
-	}
-	sc, _ := s.store.Scope(r.Context(), slug)
-	s.audit(r, a, sc, "client.status", "client", slug, map[string]any{"status": status})
-	redirectNotice(w, r, "/super", "status")
-}
-
-func (s *Server) handleSuperGrant(w http.ResponseWriter, r *http.Request, a *auth) {
-	u, _, err := s.store.EnsureUser(r.Context(), r.FormValue("email"), r.FormValue("name"))
-	if errors.Is(err, store.ErrInvalid) {
-		s.renderSuper(w, r, a, "Enter a valid email address.", http.StatusBadRequest)
-		return
-	}
-	if err == nil {
-		err = s.store.SetSuperAdmin(r.Context(), u.ID, true)
-	}
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	s.audit(r, a, store.Scope{}, "super.grant", "user", u.Email, nil)
-	code, err := s.sendInvite(r, u, "You're now a "+s.cfg.PlatformName+" platform administrator",
-		a.user.DisplayName()+" made you a platform administrator. You'll set up an authenticator app when you first sign in.")
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	if code == "invited" {
-		code = "granted"
-	}
-	redirectNotice(w, r, "/super", code)
-}
-
-func (s *Server) handleSuperRevoke(w http.ResponseWriter, r *http.Request, a *auth) {
-	id, err := strconv.ParseInt(r.PathValue("user"), 10, 64)
-	if err != nil {
-		s.message(w, http.StatusNotFound, "Not found", "There's nothing here.")
-		return
-	}
-	u, err := s.store.GetUser(r.Context(), id)
-	if err == nil {
-		err = s.store.SetSuperAdmin(r.Context(), id, false)
-	}
-	switch {
-	case errors.Is(err, store.ErrConflict):
-		s.renderSuper(w, r, a, "You can't remove the last platform administrator.", http.StatusConflict)
-		return
-	case errors.Is(err, store.ErrNotFound):
-		s.message(w, http.StatusNotFound, "Not found", "There's nothing here.")
-		return
-	case err != nil:
-		s.serverError(w, err)
-		return
-	}
-	s.audit(r, a, store.Scope{}, "super.revoke", "user", u.Email, nil)
-	redirectNotice(w, r, "/super", "revoked")
+	redirectNotice(w, r, "/admin/"+sc.Client().Slug+"/team", "removed")
 }

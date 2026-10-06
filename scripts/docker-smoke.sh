@@ -84,12 +84,21 @@ code="$(curl -s -o /dev/null -w '%{http_code}' "$(url "/c/$id")")"
 ctype="$(curl -s -o /dev/null -w '%{content_type}' "$(url "/c/$id/og.png")")"
 [ "$ctype" = image/png ] || fail "og.png content type $ctype"
 curl -fsS "$(url "/c/$id")" | grep -q 'https://certs.example.test/c/'"$id" || fail "canonical URL not from CERTS_BASE_URL"
-ok "issued and served $id"
+curl -fsS "$(url "/c/$id")" | grep -q 'href="/theme/1f8f81.css"' || fail "certificate page lacks its design stylesheet"
+curl -fsS "$(url /theme/1f8f81.css)" | grep -q -- '--cert-accent: #1f8f81' || fail "theme stylesheet"
+ok "issued and served $id (default design)"
 
-# 4. Admin API answers with the token and refuses without it.
+# 4. Admin API answers with the token and refuses without it; the client
+#    API refuses the platform token.
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$(url /admin/api/clients)")" = 401 ] || fail "admin API open without token"
 curl -fsS -H "Authorization: Bearer $TOKEN" "$(url /admin/api/clients/zcw/stats)" | grep -q '"certificates": 1' || fail "admin stats"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$(url /api/v1/certificates)")" = 401 ] || fail "client API accepted the platform token"
 ok "admin API auth"
+
+# 4b. Caddy's on-demand TLS check: yes for the platform host, no for others.
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$(url '/internal/tls-ask?domain=certs.example.test')")" = 200 ] || fail "tls-ask refused the platform host"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$(url '/internal/tls-ask?domain=evil.example')")" = 404 ] || fail "tls-ask allowed an unknown domain"
+ok "tls-ask"
 
 # 5. Accounts: bootstrap a platform admin from the CLI and check the link.
 link_out="$(docker exec "$NAME" certsforever superadmin add ops@example.test)"
@@ -99,7 +108,10 @@ path="${link#https://certs.example.test}"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$(url /login)")" = 200 ] || fail "login page"
 curl -fsS "$(url "$path")" | grep -q "Sign in as ops@example.test" || fail "sign-in link page"
 curl -fsS "$(url "$path")" | grep -q "Sign in as ops@example.test" || fail "opening the link used it up"
-docker logs "$NAME" 2>&1 | grep -q "${path#/login/}" && fail "sign-in token written to the logs"
+# Capture the logs first: with pipefail, `docker logs | grep -q` can fail
+# (or wrongly pass) when grep exits early and docker logs gets SIGPIPE.
+logs="$(docker logs "$NAME" 2>&1)"
+grep -q -- "${path#/login/}" <<<"$logs" && fail "sign-in token written to the logs"
 docker exec "$NAME" certsforever superadmin list | grep -q "ops@example.test" || fail "superadmin list"
 ok "sign-in link works, isn't consumed by GET, isn't logged"
 
@@ -109,7 +121,8 @@ if out="$(docker exec "$NAME" certsforever email test ops@example.test 2>&1)"; t
   fail "email test claimed success without SMTP: $out"
 fi
 grep -q "email is off" <<<"$out" || fail "email test didn't explain: $out"
-docker logs "$NAME" 2>&1 | grep -q "CERTS_SMTP_URL not set: email is off" || fail "no startup warning about email being off"
+logs="$(docker logs "$NAME" 2>&1)"
+grep -q "CERTS_SMTP_URL not set: email is off" <<<"$logs" || fail "no startup warning about email being off"
 ok "email reported off without SMTP"
 
 # 7. Online backup into the volume.

@@ -1,0 +1,121 @@
+{{define "title"}}{{.Client.Name}} · {{.Org}}{{end}}
+
+{{define "content"}}
+{{template "superhead" .}}
+<p><a href="/super/clients">← Clients</a></p>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>{{.Client.Name}} {{template "clientstatus" .Client}}</h2>
+    <form method="post" action="/super/clients/{{.Client.Slug}}/act-as">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="return" value="/admin/{{.Client.Slug}}">
+      <button class="btn" type="submit">{{if .Acting}}Open console (acting){{else}}Act as {{.Client.Name}}{{end}}</button>
+    </form>
+  </div>
+  {{if ne .Client.Status "active"}}<p class="status status-revoked">Suspended {{date .Client.SuspendedAt}}{{with .Client.SuspendReason}}: {{.}}{{end}}. Its certificates stay online; it can't issue new ones.</p>{{end}}
+  {{with .Overview}}
+  <p class="counts"><span><strong>{{.Certificates}}</strong> certificates</span><span><strong>{{.Courses}}</strong> courses</span>
+    <span><strong>{{pct .Claimed .Certificates}}</strong> opened</span><span><strong>{{pct .Public .Certificates}}</strong> public</span>
+    <span><strong>{{.Views30d}}</strong> views (30 days)</span>{{if .EmailsFailed}}<span class="bad"><strong>{{.EmailsFailed}}</strong> emails failed</span>{{end}}</p>
+  {{end}}
+  <p class="hint">Acting as the client opens its console with a banner; everything you do there is recorded in its audit log.</p>
+</section>
+
+<section class="panel">
+  <h2>Details</h2>
+  <form class="stack" method="post" action="/super/clients/{{.Client.Slug}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Name <input name="name" value="{{.Client.Name}}" required maxlength="120"></label>
+    <label>Certificate ID prefix
+      {{if .PrefixLocked}}<span class="hint">fixed: it's in the links of certificates already issued</span>
+      <input value="{{.Client.IDPrefix}}" disabled>
+      {{else}}<span class="hint">no certificates yet, so it can still change</span>
+      <input name="id_prefix" value="{{.Client.IDPrefix}}" pattern="[A-Za-z]{2,4}" maxlength="4" required>{{end}}</label>
+    <label>Website <input name="site_url" type="url" value="{{.Client.SiteURL}}"></label>
+    <label>About <textarea name="blurb" rows="2" maxlength="600">{{.Client.Blurb}}</textarea></label>
+    <label>LinkedIn organization ID <input name="linkedin_org_id" value="{{.Client.LinkedInOrgID}}" inputmode="numeric"></label>
+    <label>Reply-to address <input name="reply_to" type="email" value="{{.Client.ReplyTo}}"></label>
+    <label class="check"><input type="checkbox" name="send_reminders"{{if .Client.SendReminders}} checked{{end}}> One reminder after a week to students who haven't opened their certificate</label>
+    <p class="muted">Short name <code>{{.Client.Slug}}</code> · created {{date .Client.CreatedAt}}</p>
+    <div><button class="btn" type="submit">Save</button></div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Administrators</h2>
+  <table class="table">
+    <thead><tr><th>Person</th><th>Last sign-in</th><th></th></tr></thead>
+    <tbody>{{range .Members}}
+      <tr><td><a href="/super/users/{{.ID}}">{{.Email}}</a>{{with .Name}} <span class="muted">{{.}}</span>{{end}}{{if .Disabled}} <span class="tag">disabled</span>{{end}}</td>
+        <td>{{with .LastLoginAt}}{{datetime .}}{{else}}<span class="muted">invited, not signed in yet</span>{{end}}</td>
+        <td><form method="post" action="/super/clients/{{$.Client.Slug}}/members/{{.ID}}/remove">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Remove</button></form></td></tr>
+    {{else}}<tr><td colspan="3"><span class="tag">none</span> No one can manage this client yet. Invite someone.</td></tr>{{end}}</tbody>
+  </table>
+  <form class="inline-fields" method="post" action="/super/clients/{{.Client.Slug}}/members">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Email <input name="email" type="email" required></label>
+    <label>Name <input name="name"></label>
+    <button class="btn" type="submit">Invite administrator</button>
+  </form>
+</section>
+
+<section class="panel" id="domains">
+  <h2>Custom domains</h2>
+  <p class="hint">Certificates are at <code>{{.PlatformHost}}</code> unless a verified custom domain is chosen. To add one, have the client point a CNAME record at <code>{{.PlatformHost}}</code>, add it here, then check it. On a client's domain only certificate pages are served; certificate links on any other domain redirect to the chosen one.</p>
+  {{with .DNSResult}}<p class="status status-revoked" role="alert">Not verified: {{.}}</p>{{end}}
+  {{if .Domains}}
+  <table class="table">
+    <thead><tr><th>Domain</th><th>Status</th><th></th></tr></thead>
+    <tbody>{{range .Domains}}
+      <tr><td><code>{{.Host}}</code>{{if .Canonical}} <span class="pill pill-ok">used for links</span>{{end}}</td>
+        <td>{{if .Verified}}verified {{date .VerifiedAt}} <span class="muted small">({{.VerifiedBy}})</span>{{else}}<span class="pill pill-wait">not verified</span>{{end}}</td>
+        <td class="row-actions">
+          {{if not .Verified}}
+          <form method="post" action="/super/clients/{{$.Client.Slug}}/domains/{{.ID}}/check"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn btn-sm" type="submit">Check DNS</button></form>
+          <form method="post" action="/super/clients/{{$.Client.Slug}}/domains/{{.ID}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Remove</button></form>
+          <details class="inline-details"><summary>Verify by hand</summary>
+            <form method="post" action="/super/clients/{{$.Client.Slug}}/domains/{{.ID}}/verify"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <label class="check"><input type="checkbox" name="confirm"> I've checked {{.Host}} reaches this server (e.g. through a proxy the check can't see)</label>
+              <button class="btn btn-sm btn-ghost" type="submit">Mark verified</button></form></details>
+          {{else if not .Canonical}}
+          <a href="{{$.Scheme}}://{{.Host}}/verify" target="_blank" rel="noopener">Test it</a>
+          <form method="post" action="/super/clients/{{$.Client.Slug}}/domains/{{.ID}}/canonical"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn btn-sm btn-ghost" type="submit">Use for links</button></form>
+          {{else}}
+          <form method="post" action="/super/clients/{{$.Client.Slug}}/domains/platform/canonical"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Use {{$.PlatformHost}} instead</button></form>
+          {{end}}
+        </td></tr>
+    {{end}}</tbody>
+  </table>
+  <p class="hint">Before choosing a domain for links, use <em>Test it</em>: it should show {{.Client.Name}}'s verify page over HTTPS. Once chosen, certificate links everywhere redirect to it. Verified domains are never removed: certificates already shared may link to them, and they keep working.</p>
+  {{end}}
+  <form class="inline-fields" method="post" action="/super/clients/{{.Client.Slug}}/domains">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Domain <input name="host" required placeholder="certs.example.org" size="30"></label>
+    <button class="btn" type="submit">Add domain</button>
+  </form>
+</section>
+
+<section class="panel panel-danger">
+  <h2>{{if eq .Client.Status "active"}}Suspend{{else}}Reactivate{{end}}</h2>
+  <form class="inline-fields" method="post" action="/super/clients/{{.Client.Slug}}/status">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{if eq .Client.Status "active"}}
+    <input type="hidden" name="status" value="suspended">
+    <label>Reason (shown to platform admins) <input name="reason" maxlength="300" size="36"></label>
+    <button class="btn btn-danger" type="submit">Suspend {{.Client.Name}}</button>
+    {{else}}
+    <input type="hidden" name="status" value="active">
+    <button class="btn" type="submit">Reactivate {{.Client.Name}}</button>
+    {{end}}
+  </form>
+  <p class="hint">A suspended client can't issue certificates or send reminders. Its certificates stay online, and its admins can still sign in and look. Clients are never deleted: the links on people's LinkedIn profiles have to keep working.</p>
+</section>
+
+<section class="panel">
+  <h2>Recent activity</h2>
+  {{template "audit" .Audit}}
+  <p><a href="/super/audit?client={{.Client.Slug}}">Full audit log for {{.Client.Name}} →</a></p>
+</section>
+{{end}}

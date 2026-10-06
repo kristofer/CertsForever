@@ -1,0 +1,31 @@
+{{define "title"}}Team · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+<section class="panel">
+  <h2>Administrators</h2>
+  <table class="table">
+    <thead><tr><th>Email</th><th>Name</th><th>Last sign-in</th><th></th></tr></thead>
+    <tbody>
+    {{range .Members}}
+      <tr><td>{{.Email}}</td><td>{{.Name}}</td><td>{{with .LastLoginAt}}{{datetime .}}{{else}}<span class="muted">invited</span>{{end}}</td>
+        <td><form method="post" action="/admin/{{$.Client.Slug}}/members/{{.ID}}/remove">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Remove</button></form></td></tr>
+    {{else}}
+      <tr><td colspan="4" class="muted">No administrators yet.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  <form class="inline-fields" method="post" action="/admin/{{.Client.Slug}}/members">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Email <input name="email" type="email" required></label>
+    <label>Name <input name="name"></label>
+    <button class="btn" type="submit">Invite administrator</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Audit log</h2>
+  {{template "audit" .Audit}}
+</section>
+{{end}}

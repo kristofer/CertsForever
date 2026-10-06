@@ -1,0 +1,18 @@
+{{define "title"}}Cohorts · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+<section class="panel">
+  {{if .Cohorts}}
+  <table class="table">
+    <thead><tr><th>Cohort</th><th>Course</th><th>Issued</th><th class="num">Certificates</th><th class="num">Opened</th><th class="num">Public</th><th class="num">Not opened</th></tr></thead>
+    <tbody>{{range .Cohorts}}
+      <tr><td><a href="/admin/{{$.Client.Slug}}/cohorts/roster?course={{.Course}}&amp;cohort={{.Name}}">{{.Name}}</a></td>
+        <td>{{.CourseTitle}}</td><td>{{if not .IssuedOn.IsZero}}{{date .IssuedOn}}{{end}}</td>
+        <td class="num">{{.Total}}{{if .Revoked}} <span class="muted small">({{.Revoked}} revoked)</span>{{end}}</td>
+        <td class="num">{{pct .Claimed .Total}}</td><td class="num">{{pct .Public .Total}}</td><td class="num">{{.Unclaimed}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  {{else}}<p class="muted">No cohorts yet. They appear when you <a href="/admin/{{.Client.Slug}}/issue">issue certificates</a>.</p>{{end}}
+</section>
+{{end}}

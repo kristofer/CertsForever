@@ -1,7 +1,8 @@
 {{define "title"}}{{.Cert.RecipientName}} · {{.Cert.CourseTitle}} · {{.Org}}{{end}}
 
 {{define "meta"}}
-<link rel="canonical" href="{{.CanonicalURL}}">
+{{with .ThemeURL}}<link rel="stylesheet" href="{{.}}">{{end}}
+{{if not .Preview}}<link rel="canonical" href="{{.CanonicalURL}}">
 <meta name="description" content="{{.Cert.RecipientName}} completed {{.Cert.CourseTitle}} at {{.Org}}. Credential ID {{.Cert.ID}}.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{.Org}}">
@@ -11,12 +12,14 @@
 <meta property="og:image" content="{{.OGImageURL}}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="627">
-<meta property="og:image:alt" content="Certificate of completion for {{.Cert.RecipientName}}, {{.Cert.CourseTitle}}">
-<meta name="twitter:card" content="summary_large_image">
+<meta property="og:image:alt" content="{{.Design.Heading}} for {{.Cert.RecipientName}}, {{.Cert.CourseTitle}}">
+<meta name="twitter:card" content="summary_large_image">{{end}}
 {{end}}
 
 {{define "content"}}
-{{if .Cert.Revoked}}
+{{if .Preview}}
+<div class="status status-preview" role="status"><strong>Preview.</strong> This is how certificates with this design will look. Sample data, not a real certificate.</div>
+{{else if .Cert.Revoked}}
 <div class="status status-revoked" role="status">
   <strong>Revoked.</strong> This certificate was revoked on {{date .Cert.RevokedAt}} and is no longer valid.
 </div>
@@ -28,9 +31,10 @@
 {{end}}
 
 <article class="cert{{if .Cert.Revoked}} is-revoked{{end}}">
-  <p class="eyebrow">Certificate of Completion</p>
+  {{with .Design.LogoAssetID}}<img class="cert-logo" src="{{asset .}}" alt="{{$.Org}}">{{end}}
+  <p class="eyebrow">{{.Design.Heading}}</p>
   <h1>{{.Cert.RecipientName}}</h1>
-  <p class="lede">has successfully completed</p>
+  {{with .Design.BodyText}}<p class="lede">{{.}}</p>{{end}}
   <h2>{{.Cert.CourseTitle}}</h2>
   {{with .Cert.Skills}}
   <ul class="skills" aria-label="Skills">{{range .}}<li>{{.}}</li>{{end}}</ul>
@@ -40,9 +44,20 @@
     <div><dt>Cohort</dt><dd>{{.Cert.CohortName}}</dd></div>
     <div><dt>Credential ID</dt><dd><code>{{.Cert.ID}}</code></dd></div>
   </dl>
+  {{with .Design.Signatories}}
+  <div class="signatories">
+    {{range .}}
+    <div class="signatory">
+      {{with .SignatureAssetID}}<img src="{{asset .}}" alt="" class="signature">{{end}}
+      <div class="sig-line">{{.Name}}</div>
+      {{with .Title}}<div class="sig-title">{{.}}</div>{{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
 </article>
 
-{{if not .Cert.Revoked}}
+{{if not (or .Cert.Revoked .Preview)}}
 <div class="actions">
   <a class="btn" href="{{.ShareURL}}">Share on LinkedIn</a>
   <button class="btn btn-ghost" type="button" data-copy="{{.CanonicalURL}}">Copy link</button>
@@ -54,7 +69,7 @@
 <section class="about">
   <h3>About {{.Org}}</h3>
   {{with .OrgBlurb}}<p>{{.}}</p>{{end}}
-  {{with .LearnURL}}<a class="link-cta" href="{{.}}">Learn about the program <span aria-hidden="true">→</span></a>{{end}}
+  {{with .LearnURL}}{{if not $.Preview}}<a class="link-cta" href="{{.}}">Learn about the program <span aria-hidden="true">→</span></a>{{end}}{{end}}
 </section>
 {{end}}
 {{end}}

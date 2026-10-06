@@ -35,8 +35,9 @@ func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil) }
 
 // harnessOpts adjusts a test server.
 type harnessOpts struct {
-	noEmail bool // run with email off (no queue), like production without SMTP
-	cfg     func(*config.Config)
+	noEmail  bool // run with email off (no queue), like production without SMTP
+	cfg      func(*config.Config)
+	resolver Resolver // DNS for the domain check
 }
 
 func newHarnessWith(t *testing.T, o *harnessOpts) *harness {
@@ -62,7 +63,7 @@ func newHarnessWith(t *testing.T, o *harnessOpts) *harness {
 	if !o.noEmail {
 		q = outbox.NewQueue(st, box)
 	}
-	s, err := New(cfg, st, log, Deps{Queue: q})
+	s, err := New(cfg, st, log, Deps{Queue: q, Resolver: o.resolver})
 	if err != nil {
 		t.Fatal(err)
 	}

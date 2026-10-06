@@ -95,9 +95,11 @@ type Session struct {
 	User         *User
 	CSRF         string
 	TOTPVerified bool
-	CreatedAt    time.Time
-	LastSeenAt   time.Time
-	ExpiresAt    time.Time
+	// ActingClientID is the client a super admin chose to act as (0: none).
+	ActingClientID int64
+	CreatedAt      time.Time
+	LastSeenAt     time.Time
+	ExpiresAt      time.Time
 }
 
 // CreateSession starts a session and returns its secret id (for the cookie).
@@ -131,7 +133,8 @@ func (s *Store) GetSession(ctx context.Context, id string) (*Session, error) {
 	row := s.rdb.QueryRowContext(ctx, `
 		SELECT u.id, u.email, u.name, u.is_super_admin, u.totp_enabled_at IS NOT NULL, u.disabled_at IS NOT NULL,
 		       u.created_at, u.last_login_at,
-		       s.csrf_token, s.totp_verified, s.created_at, s.last_seen_at, s.expires_at
+		       s.csrf_token, s.totp_verified, s.created_at, s.last_seen_at, s.expires_at,
+		       COALESCE(s.acting_client_id, 0)
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id_hash = ? AND s.expires_at > ? AND s.last_seen_at > ? AND u.disabled_at IS NULL`,
 		hashToken(id), nowUTC(), fmtTime(clock().Add(-SessionIdle)))
@@ -139,7 +142,7 @@ func (s *Store) GetSession(ctx context.Context, id string) (*Session, error) {
 	var uCreated string
 	var lastLogin sql.NullString
 	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuper, &u.TOTPEnabled, &u.Disabled, &uCreated, &lastLogin,
-		&sess.CSRF, &totp, &created, &seen, &expires)
+		&sess.CSRF, &totp, &created, &seen, &expires, &sess.ActingClientID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

@@ -1,9 +1,14 @@
 package web
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
+	"image/png"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"certsforever/internal/certid"
@@ -19,7 +24,7 @@ func (s *Server) loadPublic(w http.ResponseWriter, r *http.Request) (*store.Cert
 	raw := r.PathValue("id")
 	id, ok := certid.Normalize(raw)
 	if !ok {
-		s.notFound(w)
+		s.notFound(w, r)
 		return nil, false
 	}
 	if id != raw {
@@ -29,7 +34,7 @@ func (s *Server) loadPublic(w http.ResponseWriter, r *http.Request) (*store.Cert
 	}
 	c, err := s.store.GetCertificate(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !c.Public()) {
-		s.notFound(w)
+		s.notFound(w, r)
 		return nil, false
 	}
 	if err != nil {
@@ -37,14 +42,31 @@ func (s *Server) loadPublic(w http.ResponseWriter, r *http.Request) (*store.Cert
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil, false
 	}
+	// Served from its canonical host; other known hosts redirect there.
+	if s.toCanonical(w, r, c.PublicBase(s.cfg.BaseURL)) {
+		return nil, false
+	}
 	return c, true
 }
 
-func (s *Server) certURL(id string) string { return s.cfg.BaseURL + "/c/" + id }
+// certURL is a certificate's canonical public URL: on its client's custom
+// domain if it has one, else on the platform domain.
+func (s *Server) certURL(c *store.Certificate) string {
+	return c.PublicBase(s.cfg.BaseURL) + "/c/" + c.ID
+}
+
+// clientCertURL is certURL when only the ID and its client are at hand.
+func (s *Server) clientCertURL(sc store.Scope, id string) string {
+	c := sc.Client()
+	return c.PublicBase(s.cfg.BaseURL) + "/c/" + id
+}
 
 type certPage struct {
 	base
 	Cert         *store.Certificate
+	Design       store.DesignSnapshot
+	ThemeURL     string
+	Preview      bool // a design preview in the console: no tracking, no actions
 	CanonicalURL string
 	OGImageURL   string
 	ShareURL     string
@@ -62,8 +84,10 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	p := certPage{
 		base:         s.issuerBase(c),
 		Cert:         c,
-		CanonicalURL: s.certURL(c.ID),
-		OGImageURL:   s.certURL(c.ID) + "/og.png",
+		Design:       c.Design,
+		ThemeURL:     themeURL(c.Design.AccentColor),
+		CanonicalURL: s.certURL(c),
+		OGImageURL:   s.certURL(c) + "/og.png",
 		ShareURL:     "/c/" + c.ID + "/share/linkedin",
 	}
 	if c.Issuer.SiteURL != "" {
@@ -78,14 +102,7 @@ func (s *Server) handleOGImage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	png, err := ogimage.Render(ogimage.Card{
-		Org:     c.Issuer.Name,
-		Heading: "Certificate of Completion",
-		Name:    c.RecipientName,
-		Course:  c.CourseTitle,
-		Footer:  "Issued " + formatMonth(c.IssuedOn) + "  ·  Verify at " + displayHost(s.certURL(c.ID)),
-		Revoked: c.Revoked(),
-	})
+	png, err := s.renderOG(r.Context(), c)
 	if err != nil {
 		s.log.Error("render og image", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -97,6 +114,94 @@ func (s *Server) handleOGImage(w http.ResponseWriter, r *http.Request) {
 	w.Write(png)
 }
 
+// renderOG draws a certificate's share image in its design.
+func (s *Server) renderOG(ctx context.Context, c *store.Certificate) ([]byte, error) {
+	card := ogimage.Card{
+		Org:     c.Issuer.Name,
+		Heading: c.Design.Heading,
+		Name:    c.RecipientName,
+		Course:  c.CourseTitle,
+		Footer:  "Issued " + formatMonth(c.IssuedOn) + "  ·  Verify at " + displayHost(s.certURL(c)),
+		Revoked: c.Revoked(),
+	}
+	if col, ok := ogimage.ParseHex(c.Design.AccentColor); ok {
+		card.Accent = col
+	}
+	if id := c.Design.LogoAssetID; id != "" {
+		if a, err := s.store.GetAsset(ctx, id); err == nil {
+			if img, err := png.Decode(bytes.NewReader(a.Bytes)); err == nil {
+				card.Logo = img
+			}
+		} else {
+			s.log.Warn("og logo", "asset", id, "err", err)
+		}
+	}
+	return ogimage.Render(card)
+}
+
+// handleAsset serves an uploaded logo or signature. Assets are immutable
+// (an edit uploads a new one), so they're cached forever.
+func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSuffix(r.PathValue("file"), ".png")
+	if !assetIDRE.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	a, err := s.store.GetAsset(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.log.Error("get asset", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	etag := `"` + a.SHA256 + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Write(a.Bytes)
+}
+
+var (
+	assetIDRE = regexp.MustCompile(`^[0-9a-f]{24}$`)
+	themeRE   = regexp.MustCompile(`^[0-9a-f]{6}\.css$`)
+)
+
+func assetURL(id string) string {
+	if id == "" {
+		return ""
+	}
+	return "/assets/" + id + ".png"
+}
+
+// themeURL is the stylesheet that sets a design's accent color. CSP
+// forbids inline styles, so the color comes from a tiny, cacheable sheet.
+func themeURL(accent string) string {
+	accent = strings.ToLower(strings.TrimPrefix(accent, "#"))
+	if !themeRE.MatchString(accent + ".css") {
+		return ""
+	}
+	return "/theme/" + accent + ".css"
+}
+
+func (s *Server) handleTheme(w http.ResponseWriter, r *http.Request) {
+	f := r.PathValue("file")
+	if !themeRE.MatchString(f) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	fmt.Fprintf(w, ":root { --cert-accent: #%s; }\n", strings.TrimSuffix(f, ".css"))
+}
+
 // handleCredentialJSON is a machine-readable record of the certificate.
 // Phase 2 replaces this with a signed Open Badges 3.0 credential.
 func (s *Server) handleCredentialJSON(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +211,7 @@ func (s *Server) handleCredentialJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{
 		"id":         c.ID,
-		"url":        s.certURL(c.ID),
+		"url":        s.certURL(c),
 		"recipient":  c.RecipientName,
 		"course":     c.CourseTitle,
 		"skills":     c.Skills,
@@ -125,7 +230,7 @@ func (s *Server) handleShareLinkedIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.track(r, c.ID, store.EventLinkedInShare)
-	http.Redirect(w, r, linkedin.ShareURL(s.certURL(c.ID)), http.StatusFound)
+	http.Redirect(w, r, linkedin.ShareURL(s.certURL(c)), http.StatusFound)
 }
 
 // handleLearnMore is the marketing hand-off: count it, tag it, send them on.
@@ -136,7 +241,7 @@ func (s *Server) handleLearnMore(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := url.Parse(c.Issuer.SiteURL)
 	if c.Issuer.SiteURL == "" || err != nil {
-		s.notFound(w)
+		s.notFound(w, r)
 		return
 	}
 	s.track(r, c.ID, store.EventLearnMore)
@@ -156,7 +261,7 @@ type verifyPage struct {
 
 func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("id"))
-	p := verifyPage{base: s.platformBase(), Query: q}
+	p := verifyPage{base: s.siteBase(r), Query: q}
 	if q != "" {
 		if id, ok := certid.Normalize(q); ok {
 			http.Redirect(w, r, "/c/"+id, http.StatusSeeOther)
@@ -191,6 +296,12 @@ func (s *Server) loadClaim(w http.ResponseWriter, r *http.Request) (*store.Certi
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil, false
 	}
+	// Claim links in older emails use the platform host, so they're served
+	// there too. On another client's domain they move to this client's.
+	if st := siteFrom(r); st != nil && st.sc.Client().ID != c.ClientID {
+		s.toCanonical(w, r, c.PublicBase(s.cfg.BaseURL))
+		return nil, false
+	}
 	return c, true
 }
 
@@ -204,7 +315,7 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 		base:        s.issuerBase(c),
 		Cert:        c,
 		Token:       token,
-		PublicURL:   s.certURL(c.ID),
+		PublicURL:   s.certURL(c),
 		AddURL:      "/claim/" + token + "/linkedin/add",
 		ShareURL:    "/c/" + c.ID + "/share/linkedin",
 		JustUpdated: r.URL.Query().Has("updated"),
@@ -246,7 +357,7 @@ func (s *Server) handleAddToLinkedIn(w http.ResponseWriter, r *http.Request) {
 		OrgID:   c.Issuer.LinkedInOrgID,
 		OrgName: c.Issuer.Name,
 		Issued:  c.IssuedOn,
-		CertURL: s.certURL(c.ID),
+		CertURL: s.certURL(c),
 		CertID:  c.ID,
 	}), http.StatusFound)
 }

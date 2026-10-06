@@ -22,9 +22,9 @@ is the most important item here.
 - [x] **M1** Multi-client schema; every client-data store call takes a client scope; per-client ID prefixes; tenant-isolation tests pass
 - [x] **M2** Login (magic link), sessions, CSRF, both admin roles, TOTP for super admins, audit log, rate limits
 - [x] **M3** System-sent email (outbox, retries, bounce handling)
-- [ ] **M4** Client console: courses, certificate designs, CSV issue with dry run, roster, revoke/reissue/resend, team, settings, stats, export
-- [ ] **M5** Super console: clients, suspend, domains, first-admin invite, act-as with audit
-- [ ] **M6** Per-client branding on certificate pages and share images (name, blurb, site and LinkedIn ID already come from the client record since M1); colors/logos from certificate designs; custom domains
+- [x] **M4** Client console: courses, certificate designs, CSV issue with dry run, roster, revoke / name correction / resend, team, settings, stats, export
+- [x] **M5** Super console: clients, suspend, domains, first-admin invite, act-as with audit
+- [x] **M6** Per-client branding on certificate pages and share images (name, blurb, site and LinkedIn ID already come from the client record since M1; colors and logos from certificate designs in M4); custom domains with canonical redirects and Caddy on-demand TLS
 
 ## Code quality — Milestone 0 (§9)
 
@@ -39,6 +39,7 @@ is the most important item here.
 
 - [ ] Server set up: firewall allows only 22/80/443, SSH by key only, automatic security updates
 - [ ] DNS for the platform domain; HTTPS working through Caddy
+- [ ] If a client wants its own domain at launch: CNAME in place, verified on its page, *Test it* shows its verify page over HTTPS, then *Use for links* (runbook §7a)
 - [ ] HSTS turned on (only after the domain is final)
 - [ ] Email sending domain authenticated: SPF, DKIM, DMARC
 - [ ] Secrets only in `.env` or secret files (never in git); admin token freshly generated
@@ -61,7 +62,7 @@ is the most important item here.
 ## Security review (§7)
 
 - [ ] Security checklist walked through: cookies, CSRF, super-admin TOTP, upload limits, rate limits, headers
-- [ ] Tried to reach client B's data while logged in as client A, by hand (as well as in the tests)
+- [ ] Tried to reach client B's data while logged in as client A, by hand (as well as in the tests). Include the M4 routes: certificates, designs (and previews), cohorts, tokens, and `/api/v1` with client A's token
 - [ ] Privacy page published
 - [ ] Student removal-request path working
 

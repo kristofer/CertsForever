@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -37,13 +38,14 @@ type Server struct {
 	// emailMode describes delivery for the System page ("SMTP", "log", "off").
 	emailMode string
 	box       *secretbox.Box
+	resolver  Resolver
 	limits    limits
 	pages     map[string]*template.Template
 	mux       *http.ServeMux
 }
 
 type limits struct {
-	loginIP, loginEmail, linkIP, totp, adminToken *ratelimit.Limiter
+	loginIP, loginEmail, linkIP, totp, adminToken, api *ratelimit.Limiter
 }
 
 // Deps are the Server's replaceable collaborators.
@@ -53,6 +55,8 @@ type Deps struct {
 	Queue *outbox.Queue
 	// EmailMode describes delivery for the System page.
 	EmailMode string
+	// Resolver checks custom domains' DNS (default: the system resolver).
+	Resolver Resolver
 }
 
 // New builds a Server and registers its routes.
@@ -67,20 +71,29 @@ func New(cfg config.Config, st *store.Store, log *slog.Logger, deps Deps) (*Serv
 			deps.EmailMode = "on"
 		}
 	}
-	s := &Server{cfg: cfg, store: st, log: log, queue: deps.Queue, emailMode: deps.EmailMode, box: box,
+	if deps.Resolver == nil {
+		deps.Resolver = netResolver{net.DefaultResolver}
+	}
+	s := &Server{cfg: cfg, store: st, log: log, queue: deps.Queue, emailMode: deps.EmailMode, box: box, resolver: deps.Resolver,
 		pages: map[string]*template.Template{}, mux: http.NewServeMux(),
 		limits: limits{
 			loginIP:    ratelimit.New(10, 10, 15*time.Minute), // sign-in emails per IP
 			loginEmail: ratelimit.New(3, 3, 15*time.Minute),   // sign-in emails per address
 			linkIP:     ratelimit.New(20, 20, 15*time.Minute), // link uses per IP
 			totp:       ratelimit.New(5, 5, 5*time.Minute),    // codes per user
-			adminToken: ratelimit.New(10, 10, time.Minute),    // failed admin-token attempts per IP
+			adminToken: ratelimit.New(10, 10, time.Minute),    // failed admin/API-token attempts per IP
+			api:        ratelimit.New(120, 120, time.Minute),  // client API requests per token
 		}}
-	funcs := template.FuncMap{"date": formatDate, "month": formatMonth, "datetime": formatDateTime}
+	funcs := template.FuncMap{"date": formatDate, "month": formatMonth, "datetime": formatDateTime,
+		"asset": assetURL, "pct": pct, "join": strings.Join, "dict": dict, "bytes": humanBytes,
+		"sub1": func(n int) int { return n - 1 }}
 	for _, p := range []string{"cert.html", "claim.html", "verify.html", "message.html",
 		"login.html", "login_confirm.html", "totp.html", "totp_setup.html",
-		"account.html", "admin_home.html", "client.html", "super.html", "system.html"} {
-		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+p)
+		"account.html", "admin_home.html", "super.html", "system.html", "act_as.html",
+		"s_clients.html", "s_client.html", "s_users.html", "s_user.html", "s_audit.html",
+		"c_overview.html", "c_certs.html", "c_cert.html", "c_issue.html", "c_cohorts.html", "c_roster.html",
+		"c_courses.html", "c_designs.html", "c_design.html", "c_team.html", "c_settings.html", "c_tokens.html"} {
+		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/parts.html", "templates/"+p)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", p, err)
 		}
@@ -95,6 +108,7 @@ func (s *Server) routes() {
 	m.Handle("GET /static/", http.FileServerFS(assets))
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	m.HandleFunc("GET /readyz", s.handleReady)
+	m.HandleFunc("GET /internal/tls-ask", s.handleTLSAsk)
 
 	// Public: what employers and LinkedIn see.
 	m.HandleFunc("GET /{$}", s.handleVerify)
@@ -104,6 +118,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /c/{id}/credential.json", s.handleCredentialJSON)
 	m.HandleFunc("GET /c/{id}/share/linkedin", s.handleShareLinkedIn)
 	m.HandleFunc("GET /c/{id}/learn", s.handleLearnMore)
+	m.HandleFunc("GET /assets/{file}", s.handleAsset)
+	m.HandleFunc("GET /theme/{file}", s.handleTheme)
 
 	// Student: reached from the emailed claim link.
 	m.HandleFunc("GET /claim/{token}", s.handleClaim)
@@ -143,15 +159,73 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /account/sign-out-elsewhere", s.user(s.handleSignOutElsewhere))
 
 	m.HandleFunc("GET /admin", s.user(s.handleAdminHome))
-	m.HandleFunc("GET /admin/{client}", s.client(s.handleClientConsole))
-	m.HandleFunc("POST /admin/{client}/members", s.client(s.handleInviteMember))
-	m.HandleFunc("POST /admin/{client}/members/{user}/remove", s.client(s.handleRemoveMember))
+	cc := "/admin/{client}"
+	m.HandleFunc("GET "+cc, s.client(s.handleClientConsole))
+	m.HandleFunc("GET "+cc+"/certificates", s.client(s.handleCertList))
+	m.HandleFunc("GET "+cc+"/certificates/export", s.client(s.handleCertExport))
+	m.HandleFunc("GET "+cc+"/certificates/{id}", s.client(s.handleCertDetail))
+	m.HandleFunc("POST "+cc+"/certificates/{id}/revoke", s.client(s.handleCertRevoke))
+	m.HandleFunc("POST "+cc+"/certificates/{id}/name", s.client(s.handleCertName))
+	m.HandleFunc("POST "+cc+"/certificates/{id}/resend", s.client(s.handleCertResend))
+	m.HandleFunc("GET "+cc+"/issue", s.client(s.handleIssueForm))
+	m.HandleFunc("POST "+cc+"/issue/preview", s.client(s.handleIssuePreview))
+	m.HandleFunc("POST "+cc+"/issue", s.client(s.handleIssue))
+	m.HandleFunc("GET "+cc+"/cohorts", s.client(s.handleCohorts))
+	m.HandleFunc("GET "+cc+"/cohorts/roster", s.client(s.handleRoster))
+	m.HandleFunc("POST "+cc+"/cohorts/remind", s.client(s.handleRemind))
+	m.HandleFunc("GET "+cc+"/courses", s.client(s.handleCourses))
+	m.HandleFunc("POST "+cc+"/courses", s.client(s.handleCourseSave))
+	m.HandleFunc("POST "+cc+"/courses/{course}/delete", s.client(s.handleCourseDelete))
+	m.HandleFunc("GET "+cc+"/designs", s.client(s.handleDesigns))
+	m.HandleFunc("GET "+cc+"/designs/new", s.client(s.handleDesignForm))
+	m.HandleFunc("POST "+cc+"/designs", s.client(s.handleDesignSave))
+	m.HandleFunc("GET "+cc+"/designs/{design}", s.client(s.handleDesignForm))
+	m.HandleFunc("POST "+cc+"/designs/{design}", s.client(s.handleDesignSave))
+	m.HandleFunc("POST "+cc+"/designs/{design}/delete", s.client(s.handleDesignDelete))
+	m.HandleFunc("GET "+cc+"/designs/{design}/preview", s.client(s.handleDesignPreview))
+	m.HandleFunc("GET "+cc+"/designs/{design}/preview.png", s.client(s.handleDesignPreviewPNG))
+	m.HandleFunc("GET "+cc+"/team", s.client(s.handleTeam))
+	m.HandleFunc("POST "+cc+"/members", s.client(s.handleInviteMember))
+	m.HandleFunc("POST "+cc+"/members/{user}/remove", s.client(s.handleRemoveMember))
+	m.HandleFunc("GET "+cc+"/settings", s.client(s.handleSettings))
+	m.HandleFunc("POST "+cc+"/settings", s.client(s.handleSettingsSave))
+	m.HandleFunc("GET "+cc+"/tokens", s.client(s.handleTokens))
+	m.HandleFunc("POST "+cc+"/tokens", s.client(s.handleTokenCreate))
+	m.HandleFunc("POST "+cc+"/tokens/{token}/revoke", s.client(s.handleTokenRevoke))
+
+	// Client API (Authorization: Bearer cfk_…): one client's token, so no
+	// {client} in the path. Same handlers as the platform admin API.
+	m.Handle("GET /api/v1/courses", s.apiToken(s.handleListCourses))
+	m.Handle("POST /api/v1/courses", s.apiToken(s.handleCreateCourse))
+	m.Handle("POST /api/v1/import", s.apiToken(s.handleImport))
+	m.Handle("GET /api/v1/certificates", s.apiToken(s.handleListCerts))
+	m.Handle("GET /api/v1/certificates/{id}", s.apiToken(s.handleGetCert))
+	m.Handle("POST /api/v1/certificates/{id}/revoke", s.apiToken(s.handleRevoke))
+	m.Handle("POST /api/v1/certificates/{id}/claim-link", s.apiToken(s.handleNewClaimLink))
+	m.Handle("GET /api/v1/stats", s.apiToken(s.handleStats))
 
 	m.HandleFunc("GET /super", s.super(s.handleSuper))
+	m.HandleFunc("GET /super/clients", s.super(s.handleSuperClients))
 	m.HandleFunc("POST /super/clients", s.super(s.handleSuperCreateClient))
-	m.HandleFunc("POST /super/clients/{client}/status", s.super(s.handleSuperClientStatus))
+	sc := "/super/clients/{client}"
+	m.HandleFunc("GET "+sc, s.super(s.handleSuperClient))
+	m.HandleFunc("POST "+sc, s.super(s.handleSuperClientSave))
+	m.HandleFunc("POST "+sc+"/status", s.super(s.handleSuperClientStatus))
+	m.HandleFunc("POST "+sc+"/act-as", s.super(s.handleActAs))
+	m.HandleFunc("POST "+sc+"/members", s.super(s.handleSuperInviteMember))
+	m.HandleFunc("POST "+sc+"/members/{user}/remove", s.super(s.handleSuperRemoveMember))
+	m.HandleFunc("POST "+sc+"/domains", s.super(s.handleDomainAdd))
+	m.HandleFunc("POST "+sc+"/domains/{domain}/check", s.super(s.handleDomainCheck))
+	m.HandleFunc("POST "+sc+"/domains/{domain}/verify", s.super(s.handleDomainVerifyManual))
+	m.HandleFunc("POST "+sc+"/domains/{domain}/canonical", s.super(s.handleDomainCanonical))
+	m.HandleFunc("POST "+sc+"/domains/{domain}/delete", s.super(s.handleDomainDelete))
+	m.HandleFunc("POST /super/act-as/stop", s.super(s.handleStopActing))
+	m.HandleFunc("GET /super/users", s.super(s.handleSuperUsers))
+	m.HandleFunc("GET /super/users/{user}", s.super(s.handleSuperUser))
+	m.HandleFunc("POST /super/users/{user}/{action}", s.super(s.handleUserAction))
 	m.HandleFunc("POST /super/admins", s.super(s.handleSuperGrant))
 	m.HandleFunc("POST /super/admins/{user}/remove", s.super(s.handleSuperRevoke))
+	m.HandleFunc("GET /super/audit", s.super(s.handleSuperAudit))
 	m.HandleFunc("GET /super/system", s.super(s.handleSystem))
 	m.HandleFunc("POST /super/system/emails/{id}/retry", s.super(s.handleRetryEmail))
 	m.HandleFunc("POST /super/system/suppressions", s.super(s.handleSuppress))
@@ -163,7 +237,7 @@ func (s *Server) routes() {
 
 // Handler returns the root handler with middleware applied.
 func (s *Server) Handler() http.Handler {
-	return s.logRequests(securityHeaders(s.mux))
+	return s.logRequests(securityHeaders(s.hostRouter(s.mux)))
 }
 
 // handleReady reports whether the server can serve traffic: both database
@@ -297,10 +371,12 @@ func (s *Server) message(w http.ResponseWriter, status int, title, body string) 
 	s.render(w, status, "message.html", p)
 }
 
-func (s *Server) notFound(w http.ResponseWriter) {
-	s.message(w, http.StatusNotFound, "Certificate not found",
-		"We couldn't find a public certificate with that ID. Check the ID and try again, "+
-			"or ask the certificate holder for their verification link.")
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
+	p := messagePage{base: s.siteBase(r), Title: "Certificate not found",
+		Body: "We couldn't find a public certificate with that ID. Check the ID and try again, " +
+			"or ask the certificate holder for their verification link."}
+	p.NoIndex = true
+	s.render(w, http.StatusNotFound, "message.html", p)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -325,6 +401,44 @@ func formatDate(v any) string {
 		}
 	}
 	return ""
+}
+
+// dict builds a map for passing several values to a sub-template.
+func dict(kv ...any) (map[string]any, error) {
+	if len(kv)%2 != 0 {
+		return nil, fmt.Errorf("dict: odd number of arguments")
+	}
+	m := make(map[string]any, len(kv)/2)
+	for i := 0; i < len(kv); i += 2 {
+		k, ok := kv[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict: key %v is not a string", kv[i])
+		}
+		m[k] = kv[i+1]
+	}
+	return m, nil
+}
+
+// humanBytes formats a size like "1.4 MB".
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// pct is n as a whole percentage of total ("–" when total is 0).
+func pct(n, total int) string {
+	if total == 0 {
+		return "–"
+	}
+	return fmt.Sprintf("%d%%", (n*100+total/2)/total)
 }
 
 func formatMonth(t time.Time) string { return t.Format("January 2006") }

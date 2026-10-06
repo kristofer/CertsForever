@@ -1,0 +1,24 @@
+{{define "title"}}Settings · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+<section class="panel">
+  <h2>Settings</h2>
+  <form class="stack" method="post" action="/admin/{{.Client.Slug}}/settings">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Organization name <span class="hint">shown on certificates and in emails</span>
+      <input name="name" value="{{.Form.Name}}" required maxlength="120"></label>
+    <label>Website <span class="hint">certificate pages link here ("Learn about the program"), tagged so you can see the visits in your analytics</span>
+      <input name="site_url" type="url" value="{{.Form.SiteURL}}" placeholder="https://"></label>
+    <label>About <span class="hint">a sentence or two shown under each certificate</span>
+      <textarea name="blurb" rows="3" maxlength="600">{{.Form.Blurb}}</textarea></label>
+    <label>LinkedIn organization ID <span class="hint">the number in your LinkedIn page's admin URL; makes "Add to profile" show your logo</span>
+      <input name="linkedin_org_id" value="{{.Form.LinkedInOrgID}}" inputmode="numeric" maxlength="20"></label>
+    <label>Reply-to address <span class="hint">where students' replies to certificate emails go</span>
+      <input name="reply_to" type="email" value="{{.Form.ReplyTo}}"></label>
+    <label class="check"><input type="checkbox" name="send_reminders"{{if .Form.SendReminders}} checked{{end}}> Remind students once, after a week, if they haven't opened their certificate</label>
+    <p class="muted">Certificate ID prefix: <code>{{.Client.IDPrefix}}</code>. Short name: <code>{{.Client.Slug}}</code>. Ask the platform administrator to change these.</p>
+    <div><button class="btn" type="submit">Save settings</button></div>
+  </form>
+</section>
+{{end}}

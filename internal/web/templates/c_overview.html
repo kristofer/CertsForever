@@ -1,0 +1,53 @@
+{{define "title"}}{{.Client.Name}} · {{.Org}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+
+{{with .Overview}}
+<section class="stats" aria-label="Summary">
+  <div class="stat"><span class="stat-n">{{.Certificates}}</span><span class="stat-l">certificates issued</span></div>
+  <div class="stat"><span class="stat-n">{{pct .Claimed .Certificates}}</span><span class="stat-l">opened by students</span></div>
+  <div class="stat"><span class="stat-n">{{pct .Public .Certificates}}</span><span class="stat-l">made public</span></div>
+  <div class="stat"><span class="stat-n">{{.Views30d}}</span><span class="stat-l">page views, 30 days</span></div>
+  <div class="stat"><span class="stat-n">{{.LearnMore30d}}</span><span class="stat-l">visits to your site, 30 days</span></div>
+  {{if .EmailsFailed}}<div class="stat stat-bad"><span class="stat-n">{{.EmailsFailed}}</span><span class="stat-l">emails failed</span></div>{{end}}
+</section>
+{{end}}
+
+{{if eq .Overview.Courses 0}}
+<section class="panel">
+  <h2>Get started</h2>
+  <ol class="steps">
+    <li><a href="/admin/{{.Client.Slug}}/settings">Check your settings</a>: your website and LinkedIn page make certificates send people your way.</li>
+    <li><a href="/admin/{{.Client.Slug}}/designs/new">Create a design</a> with your logo and colors (optional).</li>
+    <li><a href="/admin/{{.Client.Slug}}/courses">Add a course</a> for each certificate you give.</li>
+    <li><a href="/admin/{{.Client.Slug}}/issue">Issue certificates</a> from a CSV of the people who finished.</li>
+  </ol>
+</section>
+{{end}}
+
+{{if .Stats}}
+<section class="panel">
+  <h2>By course</h2>
+  <table class="table">
+    <thead><tr><th>Course</th><th class="num">Certificates</th><th class="num">Public</th><th class="num">Views</th><th class="num">Added to LinkedIn</th><th class="num">Shared</th><th class="num">Site visits</th></tr></thead>
+    <tbody>{{range .Stats}}
+      <tr><td><code>{{.Course}}</code></td><td class="num">{{.Certificates}}</td><td class="num">{{.Public}}</td><td class="num">{{.Views}}</td>
+        <td class="num">{{.LinkedInAdds}}</td><td class="num">{{.Shares}}</td><td class="num">{{.LearnMoreClks}}</td></tr>
+    {{end}}</tbody>
+  </table>
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>Recently issued</h2>
+  {{template "certrows" .}}
+  <p><a href="/admin/{{.Client.Slug}}/certificates">All certificates →</a></p>
+</section>
+
+<section class="panel">
+  <h2>Recent activity</h2>
+  {{template "audit" .Activity}}
+  <p><a href="/admin/{{.Client.Slug}}/team">Full audit log →</a></p>
+</section>
+{{end}}

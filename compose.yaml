@@ -8,6 +8,9 @@
 #
 #   docker compose --profile tls up -d --build
 #
+# Clients' own domains (CNAMEs to CERTS_DOMAIN) get certificates on demand;
+# CertsForever tells Caddy which domains are allowed (deploy/Caddyfile).
+#
 # See docs/RUNBOOK.md for backups, upgrades and restores.
 
 services:

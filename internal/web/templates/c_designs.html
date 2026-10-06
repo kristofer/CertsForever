@@ -1,0 +1,19 @@
+{{define "title"}}Designs · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+<section class="panel">
+  <h2>Certificate designs</h2>
+  <p class="hint">A design sets the heading, wording, accent color, logo and signatures. Each course uses one; courses without one use the default look.</p>
+  {{if .Designs}}
+  <ul class="design-grid">
+    {{range .Designs}}
+    <li><a href="/admin/{{$.Client.Slug}}/designs/{{.ID}}">
+      <img src="/admin/{{$.Client.Slug}}/designs/{{.ID}}/preview.png" alt="" loading="lazy" width="300" height="157">
+      <strong>{{.Name}}</strong><span class="muted small">{{if .Courses}}{{.Courses}} course{{if ne .Courses 1}}s{{end}}{{else}}not used{{end}}</span></a></li>
+    {{end}}
+  </ul>
+  {{end}}
+  <p><a class="btn" href="/admin/{{.Client.Slug}}/designs/new">New design</a></p>
+</section>
+{{end}}

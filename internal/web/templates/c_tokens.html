@@ -1,0 +1,51 @@
+{{define "title"}}API · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+
+{{with .NewToken}}
+<section class="panel panel-new" role="status">
+  <h2>Your new token</h2>
+  <p>Copy it now: it won't be shown again.</p>
+  <p class="url-row secret"><code>{{.}}</code> <button class="btn btn-ghost btn-sm" type="button" data-copy="{{.}}">Copy</button></p>
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>API tokens</h2>
+  <p class="hint">Tokens let a script or your LMS issue certificates for {{.Client.Name}}. A token can do anything on this page except manage people and tokens; keep it secret.</p>
+  {{if .Tokens}}
+  <table class="table">
+    <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+    <tbody>{{range .Tokens}}
+      <tr{{if .RevokedAt}} class="muted"{{end}}><td>{{.Name}}</td><td><code>{{.Prefix}}…</code></td><td>{{datetime .CreatedAt}}</td>
+        <td>{{with .LastUsedAt}}{{datetime .}}{{else}}never{{end}}</td>
+        <td>{{if .RevokedAt}}revoked{{else}}<form method="post" action="/admin/{{$.Client.Slug}}/tokens/{{.ID}}/revoke">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Revoke</button></form>{{end}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  {{end}}
+  <form class="inline-fields" method="post" action="/admin/{{.Client.Slug}}/tokens">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Name <input name="name" required maxlength="60" placeholder="e.g. Canvas sync"></label>
+    <button class="btn" type="submit">Create token</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Using the API</h2>
+  <pre class="sample">curl -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: text/csv" \
+     --data-binary @cohort.csv \
+     "{{.BaseURL}}/api/v1/import?notify=true"</pre>
+  <dl class="kv small">
+    <dt><code>POST /api/v1/import</code></dt><dd>Issue from a CSV (same format as the Issue page). <code>?notify=true</code> emails students.</dd>
+    <dt><code>GET /api/v1/certificates</code></dt><dd>List; filter with <code>course</code>, <code>cohort</code>, <code>q</code>, <code>status</code>, <code>claimed</code>.</dd>
+    <dt><code>GET /api/v1/certificates/{id}</code></dt><dd>One certificate.</dd>
+    <dt><code>POST /api/v1/certificates/{id}/revoke</code></dt><dd>Body <code>{"reason": "…"}</code>.</dd>
+    <dt><code>POST /api/v1/certificates/{id}/claim-link</code></dt><dd>New link for the student; <code>?notify=true</code> emails it.</dd>
+    <dt><code>GET /api/v1/courses</code>, <code>POST /api/v1/courses</code></dt><dd>List or create/update courses.</dd>
+    <dt><code>GET /api/v1/stats</code></dt><dd>Per-course numbers.</dd>
+  </dl>
+</section>
+{{end}}

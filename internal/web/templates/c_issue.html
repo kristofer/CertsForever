@@ -1,0 +1,64 @@
+{{define "title"}}Issue · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+
+{{if .Preview}}
+<section class="panel">
+  <h2>Check before issuing</h2>
+  <p class="counts">
+    <span><strong>{{.Preview.New}}</strong> new</span>
+    <span><strong>{{.Preview.Existing}}</strong> already issued (skipped)</span>
+    {{if .Preview.Duplicate}}<span><strong>{{.Preview.Duplicate}}</strong> repeated in the file (skipped)</span>{{end}}
+    {{if .Preview.Errors}}<span class="bad"><strong>{{.Preview.Errors}}</strong> to fix</span>{{end}}
+  </p>
+  <table class="table table-compact">
+    <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Course · cohort</th><th>Completed</th><th>Result</th></tr></thead>
+    <tbody>{{range .Preview.Rows}}
+      <tr class="row-{{.Action}}"><td>{{.Row}}</td><td>{{.FullName}}</td><td>{{.Email}}{{if .Suppressed}} <span class="tag" title="Earlier mail to this address bounced or was reported">won't be emailed</span>{{end}}</td>
+        <td>{{if .CourseTitle}}{{.CourseTitle}}{{else}}<code>{{.Course}}</code>{{end}} · {{.Cohort}}</td><td>{{.CompletedOn}}</td>
+        <td>{{if eq .Action "new"}}<span class="pill pill-ok">new</span>{{else if eq .Action "existing"}}<span class="pill">already issued</span>{{else if eq .Action "duplicate"}}<span class="pill">repeat</span>{{else}}<span class="pill pill-bad">error</span>{{end}}
+          {{with .Message}}<br><span class="muted small">{{.}}</span>{{end}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  {{if .Preview.OK}}
+  <form method="post" action="/admin/{{.Client.Slug}}/issue">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="csv" value="{{.CSV}}">
+    {{if .MailOn}}<label class="check"><input type="checkbox" name="notify"{{if .Notify}} checked{{end}}> Email each new recipient a link to their certificate</label>
+    {{else}}<p class="hint">Email isn't configured on this server, so students won't be emailed. Export the list afterwards and send links yourself.</p>{{end}}
+    <div class="actions">
+      <button class="btn" type="submit">Issue {{.Preview.New}} certificate{{if ne .Preview.New 1}}s{{end}}</button>
+      <a class="btn btn-ghost" href="/admin/{{.Client.Slug}}/issue">Start over</a>
+    </div>
+  </form>
+  {{else if .Preview.Errors}}
+  <p class="error">Fix the rows marked "error" in your file and upload it again. Nothing has been issued.</p>
+  {{else}}
+  <p class="muted">There's nothing new to issue: everyone in this file already has a certificate.</p>
+  {{end}}
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>{{if .Preview}}Upload a different file{{else}}Issue certificates{{end}}</h2>
+  {{if not .Courses}}
+  <p>Add a <a href="/admin/{{.Client.Slug}}/courses">course</a> first: each row in the file names one.</p>
+  {{else}}
+  <p>Upload a CSV with one row per person who finished. You'll see what will happen before anything is issued. Re-uploading the same file is safe: people who already have a certificate for that cohort are skipped.</p>
+  <form class="stack" method="post" action="/admin/{{.Client.Slug}}/issue/preview" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>CSV file <input type="file" name="file" accept=".csv,text/csv"></label>
+    <details{{if and .CSV (not .Preview)}} open{{end}}><summary>…or paste the rows</summary>
+      <textarea name="csv" rows="8" spellcheck="false">{{if not .Preview}}{{.CSV}}{{end}}</textarea>
+    </details>
+    {{if .MailOn}}<label class="check"><input type="checkbox" name="notify"{{if .Notify}} checked{{end}}> Email each new recipient a link to their certificate</label>{{end}}
+    <div><button class="btn" type="submit">Check file</button></div>
+  </form>
+  <h3>Format</h3>
+  <pre class="sample">email,full_name,course,cohort,completed_on
+ada@example.com,Ada Lovelace,{{(index .Courses 0).Slug}},Spring 2026,2026-05-30</pre>
+  <p class="hint"><code>course</code> is the course's short name: {{range $i, $c := .Courses}}{{if $i}}, {{end}}<code>{{$c.Slug}}</code>{{end}}. <code>completed_on</code> is YYYY-MM-DD. Names are printed exactly as written.</p>
+  {{end}}
+</section>
+{{end}}

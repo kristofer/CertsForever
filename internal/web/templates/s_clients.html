@@ -1,0 +1,40 @@
+{{define "title"}}Clients · {{.Org}}{{end}}
+
+{{define "content"}}
+{{template "superhead" .}}
+<section class="panel">
+  <h2>Clients</h2>
+  {{template "clienttable" .}}
+</section>
+
+<section class="panel" id="new">
+  <h2>Add a client</h2>
+  <form class="stack" method="post" action="/super/clients">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Name <input name="name" required maxlength="120" placeholder="TwinArrows" value="{{index .Form "name"}}"></label>
+    <label>Short name <span class="hint">in console URLs, e.g. <code>twa</code>: lowercase letters, digits, dashes</span>
+      <input name="slug" required pattern="[a-z0-9][a-z0-9\-]{1,39}" maxlength="40" value="{{index .Form "slug"}}"></label>
+    <label>Certificate ID prefix <span class="hint">2–4 letters at the start of every certificate ID (TWA-7K3M9QF2XA). Fixed once the first certificate is issued.</span>
+      <input name="id_prefix" required pattern="[A-Za-z]{2,4}" maxlength="4" value="{{index .Form "id_prefix"}}"></label>
+    <label>Website <input name="site_url" type="url" placeholder="https://" value="{{index .Form "site_url"}}"></label>
+    <label>LinkedIn organization ID <span class="hint">optional</span> <input name="linkedin_org_id" inputmode="numeric" value="{{index .Form "linkedin_org_id"}}"></label>
+    <label>First administrator's email <span class="hint">they'll get an invitation to sign in and set things up</span>
+      <input name="admin_email" type="email" value="{{index .Form "admin_email"}}"></label>
+    <div><button class="btn" type="submit">Create client</button></div>
+  </form>
+</section>
+{{end}}
+
+{{define "clienttable"}}
+{{if .Clients}}
+<table class="table">
+  <thead><tr><th>Client</th><th>Status</th><th class="num">Certificates</th><th class="num">Courses</th><th class="num">Admins</th><th>Created</th></tr></thead>
+  <tbody>{{range .Clients}}
+    <tr><td><a href="/super/clients/{{.Slug}}">{{.Name}}</a><br><span class="muted small"><code>{{.IDPrefix}}</code> · {{.Slug}}</span></td>
+      <td>{{template "clientstatus" .}}{{with .SuspendReason}}<br><span class="muted small">{{.}}</span>{{end}}</td>
+      <td class="num">{{.Certificates}}</td><td class="num">{{.Courses}}</td>
+      <td class="num">{{if .Admins}}{{.Admins}}{{else}}<span class="tag">none</span>{{end}}</td><td>{{date .CreatedAt}}</td></tr>
+  {{end}}</tbody>
+</table>
+{{else}}<p class="muted">No clients yet.</p>{{end}}
+{{end}}

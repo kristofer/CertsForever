@@ -1,0 +1,40 @@
+{{define "title"}}People · {{.Org}}{{end}}
+
+{{define "content"}}
+{{template "superhead" .}}
+<form class="filters" method="get">
+  <label>Search <input name="q" value="{{.Filter.Query}}" placeholder="Email or name"></label>
+  <label>Show
+    <select name="role">
+      <option value="">Everyone</option>
+      <option value="super"{{if eq .Filter.Role "super"}} selected{{end}}>Platform administrators</option>
+      <option value="admin"{{if eq .Filter.Role "admin"}} selected{{end}}>Client administrators</option>
+      <option value="disabled"{{if eq .Filter.Role "disabled"}} selected{{end}}>Disabled</option>
+    </select></label>
+  <button class="btn btn-sm" type="submit">Filter</button>
+</form>
+
+<section class="panel">
+  <table class="table">
+    <thead><tr><th>Person</th><th>Role</th><th>Two-step</th><th>Last sign-in</th></tr></thead>
+    <tbody>{{range .Users}}
+      <tr{{if .Disabled}} class="muted"{{end}}><td><a href="/super/users/{{.ID}}">{{.Email}}</a>{{with .Name}}<br><span class="muted small">{{.}}</span>{{end}}</td>
+        <td>{{if .IsSuper}}<span class="pill pill-ok">platform</span> {{end}}{{if .Clients}}{{.Clients}} client{{if ne .Clients 1}}s{{end}}{{end}}{{if .Disabled}} <span class="tag">disabled</span>{{end}}</td>
+        <td>{{if .TOTPEnabled}}on{{else if .IsSuper}}<span class="tag">not set up</span>{{else}}<span class="muted">–</span>{{end}}</td>
+        <td>{{with .LastLoginAt}}{{datetime .}}{{else}}<span class="muted">never</span>{{end}}</td></tr>
+    {{else}}<tr><td colspan="4" class="muted">No one matches.</td></tr>{{end}}</tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Add a platform administrator</h2>
+  <p class="hint">They can do everything on this platform, so add only people who need to. They'll get an invitation and must set up two-step sign-in.</p>
+  <form class="inline-fields" method="post" action="/super/admins">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Email <input name="email" type="email" required></label>
+    <label>Name <input name="name"></label>
+    <button class="btn" type="submit">Add platform administrator</button>
+  </form>
+  <p class="hint">Client administrators are invited from each client's page.</p>
+</section>
+{{end}}

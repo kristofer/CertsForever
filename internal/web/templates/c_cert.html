@@ -1,0 +1,75 @@
+{{define "title"}}{{.Cert.RecipientName}} · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+
+<p><a href="/admin/{{.Client.Slug}}/certificates">← Certificates</a></p>
+
+<section class="panel">
+  <h2>{{.Cert.RecipientName}} {{template "certstatus" .Cert}}</h2>
+  <dl class="kv">
+    <dt>Course</dt><dd>{{.Cert.CourseTitle}} <span class="muted">(<code>{{.Cert.CourseSlug}}</code>)</span></dd>
+    <dt>Cohort</dt><dd><a href="/admin/{{.Client.Slug}}/cohorts/roster?course={{.Cert.CourseSlug}}&amp;cohort={{.Cert.CohortName}}">{{.Cert.CohortName}}</a></dd>
+    <dt>Email</dt><dd>{{.Cert.Email}}</dd>
+    <dt>Issued</dt><dd>{{date .Cert.IssuedOn}}</dd>
+    <dt>Credential ID</dt><dd><code>{{.Cert.ID}}</code></dd>
+    <dt>Public page</dt><dd>{{if .Cert.Public}}<a href="{{.URL}}">{{.URL}}</a>{{else}}<span class="muted">private until the student publishes it</span>{{end}}</dd>
+    <dt>Opened</dt><dd>{{with .Cert.ClaimedAt}}{{datetime .}}{{else}}<span class="muted">not yet</span>{{end}}</dd>
+    {{with .Cert.NameCorrectedAt}}<dt>Name corrected</dt><dd>{{datetime .}}</dd>{{end}}
+    {{if .Cert.Revoked}}<dt>Revoked</dt><dd>{{date .Cert.RevokedAt}}: {{.Cert.RevokeReason}}</dd>{{end}}
+    <dt>Activity</dt><dd>{{index .Events "view"}} views · {{index .Events "linkedin_add"}} added to LinkedIn · {{index .Events "linkedin_share"}} shares · {{index .Events "learn_more"}} site visits</dd>
+  </dl>
+</section>
+
+{{if not .Cert.Revoked}}
+<section class="panel">
+  <h2>Correct the name</h2>
+  <p class="hint">Fixes a typo in place. The link, credential ID and anything already on LinkedIn stay valid. The change is recorded below.</p>
+  <form class="inline-fields" method="post" action="/admin/{{.Client.Slug}}/certificates/{{.Cert.ID}}/name">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Name on the certificate <input name="name" value="{{.NameForm}}" required maxlength="120" size="32"></label>
+    <button class="btn" type="submit">Save name</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Send a new link</h2>
+  {{if .MailOn}}
+  <p class="hint">Emails {{.Cert.Email}} a fresh link to their certificate. The old link stops working.</p>
+  <form method="post" action="/admin/{{.Client.Slug}}/certificates/{{.Cert.ID}}/resend">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button class="btn btn-ghost" type="submit"{{if .Cert.EmailBlocked}} disabled{{end}}>Email a new link</button>
+  </form>
+  {{else}}<p class="muted">Email isn't configured on this server. The platform operator can print a link with <code>certsforever claim-link {{.Cert.ID}}</code>.</p>{{end}}
+</section>
+
+<section class="panel panel-danger">
+  <h2>Revoke</h2>
+  <p class="hint">The public page will say the certificate is no longer valid. This can't be undone.</p>
+  <form class="inline-fields" method="post" action="/admin/{{.Client.Slug}}/certificates/{{.Cert.ID}}/revoke">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Reason (for your records) <input name="reason" required maxlength="200" size="32"></label>
+    <button class="btn btn-danger" type="submit">Revoke certificate</button>
+  </form>
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>Emails</h2>
+  {{if .Emails}}
+  <table class="table table-compact">
+    <thead><tr><th>Queued</th><th>Message</th><th>Status</th><th>Sent</th></tr></thead>
+    <tbody>{{range .Emails}}
+      <tr><td>{{datetime .CreatedAt}}</td><td><code>{{.Template}}</code></td>
+        <td>{{.Status}}{{if eq .Status "failed"}} <span class="muted small">{{.LastError}}</span>{{end}}</td>
+        <td>{{with .SentAt}}{{datetime .}}{{end}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  {{else}}<p class="muted">No emails about this certificate.</p>{{end}}
+</section>
+
+<section class="panel">
+  <h2>History</h2>
+  {{template "audit" .History}}
+</section>
+{{end}}

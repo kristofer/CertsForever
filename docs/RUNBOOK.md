@@ -17,7 +17,7 @@ Commands run from the repository checkout on the server (where
 4. [Back up](#4-back-up)
 5. [Restore](#5-restore)
 6. [Roll back a bad release](#6-roll-back-a-bad-release)
-7. [Rotate the admin token](#7-rotate-the-admin-token) · [People and access](#7a-people-and-access) · [Email](#7b-email)
+7. [Rotate the admin token](#7-rotate-the-admin-token) · [People and access](#7a-people-and-access) · [Email](#7b-email) · [Client console and API tokens](#7c-client-console-and-api-tokens)
 8. [Logs](#8-logs)
 9. [Releases and CI](#9-releases-and-ci)
 10. [Configuration reference](#10-configuration-reference)
@@ -104,8 +104,16 @@ Migrations are forward-only. The server refuses to start if:
 - the database was migrated by a *newer* build (the downgrade guard).
   See §6.
 
-Snapshots aren't pruned automatically. After an upgrade has run
-cleanly for a while, remove old ones (see §4 for listing files).
+Snapshots aren't pruned automatically. The System page lists them with
+their sizes. After an upgrade has run cleanly for a while (a week, say),
+remove the older ones:
+
+```sh
+# The image has no shell, so use a throwaway container on the same volume.
+# The volume is <project>_certs-data; `docker volume ls` shows the name.
+docker run --rm -v certsforever_certs-data:/data busybox ls -l /data
+docker run --rm -v certsforever_certs-data:/data busybox rm /data/certs.pre-005-20261006T165918Z.db
+```
 
 ## 4. Back up
 
@@ -184,8 +192,19 @@ variables is a startup error.
 
 Everyday access is managed in the browser. Platform administrators work at
 `/super`, and client administrators at `/admin/{client}`. Every change lands
-in the audit log. These CLI commands are for the cases the browser can't
-handle:
+in the audit log.
+
+| Situation | In the browser |
+|---|---|
+| Someone lost their phone (two-step) | People → the person → *Reset two-step sign-in* |
+| Someone leaves, or an account may be compromised | People → the person → *Disable* (signs them out everywhere, voids their links) |
+| A client needs a new admin | Clients → the client → *Invite administrator* |
+| Help a client with something in their console | Clients → the client → *Act as …*. A banner shows until you press *Stop acting*; everything is in the client's audit log |
+| Stop a client issuing (e.g. a contract ended) | Clients → the client → *Suspend*, with a reason. Their certificates stay online |
+| Who did what | Audit log, filtered by client, person or action |
+
+You can't use these on your own account; another platform administrator has
+to. The CLI covers the cases the browser can't:
 
 | Situation | Command |
 |---|---|
@@ -197,6 +216,46 @@ handle:
 
 A printed sign-in link is as good as a password for an hour. Send it over a
 channel you trust, or open it yourself.
+
+### Adding a client's custom domain
+
+1. The client creates a DNS record: a CNAME from their host (e.g.
+   `certs.zipcodewilmington.com`) to the platform host.
+2. Clients → the client → *Custom domains* → add the host, then *Check DNS*.
+   The check passes when the host is a CNAME to the platform host or resolves
+   to the same address. If it doesn't pass, the page says what the host points
+   at now.
+3. If a proxy (e.g. Cloudflare) hides the real target, use *Verify by hand*
+   after checking yourself. It's recorded as `manual`.
+4. Click *Test it*. It should show the client's verify page over HTTPS. The
+   first request takes a few seconds while Caddy gets the TLS certificate.
+   Caddy asks CertsForever first (`/internal/tls-ask`), and only verified
+   domains get certificates.
+5. *Use for links*. From then on:
+   - certificate pages, share images, LinkedIn links and new claim emails
+     use the client's domain;
+   - certificate URLs on the platform domain (or a domain the client used
+     before) answer with a 301 to the client's domain, so everything already
+     shared keeps working;
+   - on the client's domain, only certificate pages, claim links and the
+     verify page are served. Sign-in, the consoles and the APIs redirect to
+     the platform domain, so session cookies never exist on a client's
+     domain.
+
+A verified domain is never removed, because certificates already shared may
+point at it. To move away from one, choose another domain (or the platform
+domain) for links; the old one keeps working and redirects.
+
+**If a client's domain stops working** (they changed their DNS), every
+certificate link redirects to a broken domain. Fix it fast:
+Clients → the client → *Use {platform host} instead*. Links go back to
+the platform domain at once, with no restart and nothing to undo later.
+
+**Running your own proxy instead of Caddy:** pass the original `Host` header
+through, and only get TLS certificates for names `/internal/tls-ask?domain=`
+answers 200 for. That endpoint answers only direct requests: a request
+relayed with `X-Forwarded-For` gets 404, so outsiders can't use it to list
+the domains.
 
 ## 7b. Email
 
@@ -244,6 +303,34 @@ channel you trust, or open it yourself.
 | A student says they never got their link | Check whether they're suppressed. Fix the address or `email unsuppress`, then `claim-link -email CERT_ID` |
 | Someone asks to never be emailed | **Suppress address** on `/super/system`, or `email suppress ADDRESS` |
 | Stop publish reminders for a client | `… certsforever client update -slug zcw -reminders off` |
+
+## 7c. Client console and API tokens
+
+Client admins handle their own day-to-day work at `/admin/{client}`, so most
+requests to the operator now become "it's on the … page":
+
+| Request | Where |
+|---|---|
+| "A student's name is misspelled" | Certificates → the certificate → *Correct the name*. Fixed in place; the link and LinkedIn entry stay valid |
+| "A student lost their email" | Certificates → the certificate → *Email a new link* (the old link stops working) |
+| "Half the cohort hasn't opened theirs" | Cohorts → the cohort → *Remind …*. Skips anyone emailed in the last day |
+| "We issued the wrong file" | Certificates → each certificate → *Revoke* (there's no undo, by design) |
+| "Change our logo or colors" | Designs. Only certificates issued afterwards change |
+
+**A leaked API token.** The client admin revokes it on the API page. If they
+can't be reached, a platform admin opens the client from `/super` and revokes
+it there; the client's audit log records who did it. Tokens start with `cfk_`,
+so secret scanners can find them in code and logs. Each token is limited to 120
+requests a minute.
+
+**Uploaded logos and signatures** live in the database (`assets` table), so
+the normal backups cover them. Each one is re-encoded and small (usually under
+100 KB). Uploads are never deleted, because issued certificates refer to
+them.
+
+**Upgrading to schema 5** (Milestone 4) adds tables and columns only. It
+changes no existing rows, and certificates issued before it render with the
+default design.
 
 ## 8. Logs
 

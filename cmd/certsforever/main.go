@@ -413,7 +413,7 @@ func importCSV(ctx context.Context, cfg config.Config, args []string) error {
 		}
 		hook = func(r store.IssueResult) (*store.NewEmail, error) {
 			return web.CertificateReadyEmail(q, platformOf(cfg), sc.Client(), r.Email, r.FullName, r.CourseTitle,
-				r.CertificateID, web.ClaimURL(cfg.BaseURL, r.ClaimToken))
+				r.CertificateID, web.ClaimURL(publicBase(cfg, sc), r.ClaimToken))
 		}
 	}
 	results, err := st.IssueAndNotify(ctx, sc, reqs, hook)
@@ -441,10 +441,10 @@ func importCSV(ctx context.Context, cfg config.Config, args []string) error {
 			status = "emailed"
 			issued++
 		default:
-			status, claim = "issued", web.ClaimURL(cfg.BaseURL, r.ClaimToken)
+			status, claim = "issued", web.ClaimURL(publicBase(cfg, sc), r.ClaimToken)
 			issued++
 		}
-		cw.Write([]string{r.Email, r.FullName, r.CertificateID, cfg.BaseURL + "/c/" + r.CertificateID, claim, status})
+		cw.Write([]string{r.Email, r.FullName, r.CertificateID, publicBase(cfg, sc) + "/c/" + r.CertificateID, claim, status})
 	}
 	cw.Flush()
 	auditCLI(ctx, st, sc, "certificates.issue", "", "", map[string]any{"rows": len(results), "issued": issued, "emailed": *sendEmail})
@@ -506,7 +506,7 @@ func claimLink(ctx context.Context, cfg config.Config, args []string) error {
 		_, err = st.NewClaimLinkAndNotify(ctx, sc, fs.Arg(0), func(c *store.Certificate, tok string) (*store.NewEmail, error) {
 			to = c.Email
 			return web.CertificateReadyEmail(q, platformOf(cfg), sc.Client(), c.Email, c.RecipientName, c.CourseTitle,
-				c.ID, web.ClaimURL(cfg.BaseURL, tok))
+				c.ID, web.ClaimURL(c.PublicBase(cfg.BaseURL), tok))
 		})
 		if err != nil {
 			return err
@@ -520,8 +520,15 @@ func claimLink(ctx context.Context, cfg config.Config, args []string) error {
 		return err
 	}
 	auditCLI(ctx, st, sc, "certificate.claim_link", "certificate", fs.Arg(0), nil)
-	fmt.Println(web.ClaimURL(cfg.BaseURL, token))
+	fmt.Println(web.ClaimURL(publicBase(cfg, sc), token))
 	return nil
+}
+
+// publicBase is where a client's certificate and claim links live: its
+// custom domain, if it has a verified one in use, else CERTS_BASE_URL.
+func publicBase(cfg config.Config, sc store.Scope) string {
+	c := sc.Client()
+	return c.PublicBase(cfg.BaseURL)
 }
 
 func demo(ctx context.Context, cfg config.Config) error {
@@ -571,9 +578,10 @@ func demo(ctx context.Context, cfg config.Config) error {
 	if err := st.SetVisibilityByClaimToken(ctx, token, "public"); err != nil {
 		return err
 	}
-	fmt.Println("public page: ", cfg.BaseURL+"/c/"+r.CertificateID)
-	fmt.Println("share image: ", cfg.BaseURL+"/c/"+r.CertificateID+"/og.png")
-	fmt.Println("claim page:  ", web.ClaimURL(cfg.BaseURL, token))
+	base := publicBase(cfg, sc)
+	fmt.Println("public page: ", base+"/c/"+r.CertificateID)
+	fmt.Println("share image: ", base+"/c/"+r.CertificateID+"/og.png")
+	fmt.Println("claim page:  ", web.ClaimURL(base, token))
 	return nil
 }
 
@@ -625,7 +633,7 @@ func clientCmd(ctx context.Context, cfg config.Config, args []string) error {
                              [-reply-to ADDRESS] [-reminders on|off]
   certsforever client update -slug zcw [-name ...] [-prefix ...] [-site ...] [-blurb ...] [-linkedin-org ...]
                              [-reply-to ...] [-reminders on|off]
-  certsforever client suspend  -slug zcw
+  certsforever client suspend  -slug zcw [-reason "contract ended"]
   certsforever client activate -slug zcw`)
 	if len(args) == 0 {
 		return usage
@@ -639,6 +647,7 @@ func clientCmd(ctx context.Context, cfg config.Config, args []string) error {
 	blurb := fs.String("blurb", "", "one or two sentences shown on certificate pages")
 	linkedin := fs.String("linkedin-org", "", "numeric LinkedIn company page ID")
 	replyTo := fs.String("reply-to", "", "Reply-To address on emails to this client's students")
+	reason := fs.String("reason", "", "suspend: why (shown to platform admins)")
 	reminders := fs.String("reminders", "", "on|off: one publish reminder after 7 days (default on)")
 	fs.Parse(args)
 
@@ -712,11 +721,15 @@ func clientCmd(ctx context.Context, cfg config.Config, args []string) error {
 			return usage
 		}
 		status := map[string]string{"suspend": "suspended", "activate": "active"}[sub]
-		if err := st.SetClientStatus(ctx, *slug, status); err != nil {
+		if err := st.SetClientStatusReason(ctx, *slug, status, *reason); err != nil {
 			return err
 		}
 		if sc, err := st.Scope(ctx, *slug); err == nil {
-			auditCLI(ctx, st, sc, "client.status", "client", *slug, map[string]any{"status": status})
+			details := map[string]any{"status": status}
+			if status == "suspended" && *reason != "" {
+				details["reason"] = *reason
+			}
+			auditCLI(ctx, st, sc, "client.status", "client", *slug, details)
 		}
 		fmt.Printf("client %s is now %s\n", *slug, status)
 		return nil

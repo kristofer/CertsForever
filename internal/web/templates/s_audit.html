@@ -1,0 +1,20 @@
+{{define "title"}}Audit log · {{.Org}}{{end}}
+
+{{define "content"}}
+{{template "superhead" .}}
+<form class="filters" method="get">
+  <label>Client
+    <select name="client">
+      <option value="">All</option>
+      <option value="-"{{if eq .Filter.Client "-"}} selected{{end}}>Platform only</option>
+      {{range .Clients}}<option value="{{.Slug}}"{{if eq .Slug $.Filter.Client}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select></label>
+  <label>Who <input name="actor" value="{{.Filter.Actor}}" placeholder="email, cli, api-token…"></label>
+  <label>Action starts with <input name="action" value="{{.Filter.Action}}" placeholder="certificate."></label>
+  <button class="btn btn-sm" type="submit">Filter</button>
+</form>
+<section class="panel">
+  {{template "audit" .Entries}}
+  {{with .Older}}<nav class="pager"><a href="{{.}}">Older →</a></nav>{{end}}
+</section>
+{{end}}

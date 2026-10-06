@@ -1,75 +1,52 @@
 {{define "title"}}Platform · {{.Org}}{{end}}
 
 {{define "content"}}
-<p class="eyebrow">Platform administration</p>
-<h1 class="page-title">{{.Org}}</h1>
-{{with .Notice}}<div class="status status-ok" role="status">{{.}}</div>{{end}}
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{template "superhead" .}}
+
+{{with .Stats}}
+<section class="stats" aria-label="Summary">
+  <div class="stat"><span class="stat-n">{{.Clients}}</span><span class="stat-l">clients{{if .Suspended}} ({{.Suspended}} suspended){{end}}</span></div>
+  <div class="stat"><span class="stat-n">{{.Certificates}}</span><span class="stat-l">certificates issued</span></div>
+  <div class="stat"><span class="stat-n">{{.Issued30d}}</span><span class="stat-l">issued in the last 30 days</span></div>
+  <div class="stat"><span class="stat-n">{{.Users}}</span><span class="stat-l">people with access</span></div>
+  <div class="stat"><span class="stat-n">{{.EmailsWaiting}}</span><span class="stat-l">emails waiting to send</span></div>
+</section>
+
+{{if or .EmailsFailed .SupersNoTOTP}}
+<section class="panel panel-danger">
+  <h2>Needs attention</h2>
+  <ul>
+    {{if .EmailsFailed}}<li><a href="/super/system">{{.EmailsFailed}} email{{if ne .EmailsFailed 1}}s{{end}} failed</a> to send.</li>{{end}}
+    {{if .SupersNoTOTP}}<li>{{.SupersNoTOTP}} platform administrator{{if ne .SupersNoTOTP 1}}s haven't{{else}} hasn't{{end}} set up two-step sign-in yet (they will be made to on their next sign-in). <a href="/super/users?role=super">See who</a>.</li>{{end}}
+  </ul>
+</section>
+{{end}}
+{{end}}
 
 <section class="panel">
   <h2>Clients</h2>
-  <table class="table">
-    <thead><tr><th>Client</th><th>Prefix</th><th>Status</th><th></th></tr></thead>
-    <tbody>
-    {{range .Clients}}
-      <tr><td><a href="/admin/{{.Slug}}">{{.Name}}</a> <span class="muted">{{.Slug}}</span></td><td><code>{{.IDPrefix}}</code></td><td>{{.Status}}</td>
-        <td><form method="post" action="/super/clients/{{.Slug}}/status">
-          <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          {{if eq .Status "active"}}<input type="hidden" name="status" value="suspended"><button class="btn-link" type="submit">Suspend</button>
-          {{else}}<input type="hidden" name="status" value="active"><button class="btn-link" type="submit">Reactivate</button>{{end}}
-        </form></td></tr>
-    {{else}}
-      <tr><td colspan="4" class="muted">No clients yet.</td></tr>
-    {{end}}
-    </tbody>
-  </table>
-  <h3>New client</h3>
-  <form class="inline-fields" method="post" action="/super/clients">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>Name <input name="name" required placeholder="Zip Code Wilmington"></label>
-    <label>Slug <input name="slug" required pattern="[a-z0-9][a-z0-9-]{1,39}" placeholder="zcw"></label>
-    <label>ID prefix <input name="id_prefix" required pattern="[A-Za-z]{2,4}" maxlength="4" placeholder="ZCW"></label>
-    <label>Website <input name="site_url" type="url" placeholder="https://"></label>
-    <label>LinkedIn company ID <input name="linkedin_org_id" inputmode="numeric"></label>
-    <label>First admin's email <input name="admin_email" type="email"></label>
-    <button class="btn" type="submit">Create client</button>
-  </form>
-  <p class="hint">The ID prefix appears in every certificate URL and can't be changed after the first certificate.</p>
+  {{template "clienttable" .}}
+  <p><a href="/super/clients#new">Add a client →</a></p>
 </section>
 
 <section class="panel">
-  <h2>Platform administrators</h2>
-  <table class="table">
-    <thead><tr><th>Email</th><th>Two-step</th><th>Last sign-in</th><th></th></tr></thead>
-    <tbody>{{range .Supers}}
-      <tr><td>{{.Email}}</td><td>{{if .TOTPEnabled}}on{{else}}<span class="muted">not set up</span>{{end}}</td>
-        <td>{{with .LastLoginAt}}{{datetime .}}{{else}}<span class="muted">never</span>{{end}}</td>
-        <td><form method="post" action="/super/admins/{{.ID}}/remove">
-          <input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Remove</button></form></td></tr>
-    {{end}}</tbody>
-  </table>
-  <form class="inline-fields" method="post" action="/super/admins">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>Email <input name="email" type="email" required></label>
-    <label>Name <input name="name"></label>
-    <button class="btn" type="submit">Add platform administrator</button>
-  </form>
-</section>
-
-<section class="panel">
-  <h2>Audit log (all clients)</h2>
+  <h2>Recent activity</h2>
   {{template "audit" .Audit}}
+  <p><a href="/super/audit">Full audit log →</a></p>
 </section>
 {{end}}
 
-{{define "audit"}}
-{{if .}}
-<table class="table table-compact">
-  <thead><tr><th>When</th><th>Who</th><th>What</th><th>Target</th></tr></thead>
-  <tbody>{{range .}}
-    <tr><td>{{datetime .At}}</td><td>{{.Actor}}{{if .Impersonated}} <span class="tag">platform</span>{{end}}</td>
-      <td><code>{{.Action}}</code>{{with .ClientSlug}} <span class="muted">{{.}}</span>{{end}}</td><td>{{.TargetID}}</td></tr>
+{{define "clienttable"}}
+{{if .Clients}}
+<table class="table">
+  <thead><tr><th>Client</th><th>Status</th><th class="num">Certificates</th><th class="num">Last 30 days</th><th class="num">Public</th><th class="num">Admins</th><th>Last issued</th></tr></thead>
+  <tbody>{{range .Clients}}
+    <tr><td><a href="/super/clients/{{.Slug}}">{{.Name}}</a><br><span class="muted small"><code>{{.IDPrefix}}</code> · {{.Slug}}{{with .Domain}} · {{.}}{{end}}</span></td>
+      <td>{{template "clientstatus" .}}</td>
+      <td class="num">{{.Certificates}}</td><td class="num">{{.Issued30d}}</td><td class="num">{{pct .Public .Certificates}}</td>
+      <td class="num">{{if .Admins}}{{.Admins}}{{else}}<span class="tag">none</span>{{end}}</td>
+      <td>{{with .LastIssued}}{{date .}}{{else}}<span class="muted">never</span>{{end}}</td></tr>
   {{end}}</tbody>
 </table>
-{{else}}<p class="muted">Nothing recorded yet.</p>{{end}}
+{{else}}<p class="muted">No clients yet.</p>{{end}}
 {{end}}

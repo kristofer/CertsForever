@@ -44,9 +44,8 @@ nothing needs preserving yet. Forward-only migrations start from there.
 > **As built in Milestone 2:**
 > - **Invitations:** they aren't a separate table. An invite adds the
 >   membership and emails a 7-day single-use link (`login_tokens.purpose = 'invite'`).
-> - **Acting as a client:** this isn't a separate mode. A super admin can open
->   any client's console, the page shows a banner, and their actions are
->   audited with `impersonated = 1`.
+> - **Acting as a client:** this was implicit in Milestone 2. Milestone 5
+>   made it an explicit, recorded step, as planned below (see the note in §4).
 > - **TOTP setup:** it shows the setup key and an `otpauth://` link. A QR code
 >   can come later.
 > - **Email delivery:** email goes straight to SMTP for now. Milestone 3
@@ -208,6 +207,42 @@ clients ─┬─< client_domains
 - **ID normalization:** generalize `certid.Normalize` to accept any registered
   prefix.
 
+> **As built in Milestone 6:**
+> - **Which host:** routing uses the `Host` header, which Caddy passes through.
+>   `X-Forwarded-Host` is ignored, because a client can set it.
+>   - Platform host: everything is served.
+>   - A verified client domain: only the public paths are served, branded
+>     for that client. These are `/`, `/verify`, `/c/…`, `/claim/…`, and
+>     `/static`, `/assets` and `/theme`. Other GETs get a 302 to the
+>     platform host, and other methods get 404, so session cookies never
+>     exist on a client's domain.
+>   - Any other host (localhost, the container name, an unverified domain):
+>     treated as the platform host and never redirected, so health checks
+>     work. Caddy won't get TLS certificates for these names.
+> - **Canonical URL:** the client's chosen domain, else the platform domain.
+>   - A public certificate URL on any other known host gets a 301 there (308
+>     for non-GET). Private and unknown IDs still 404 first, so a redirect
+>     never reveals that one exists.
+>   - Claim links stay valid on the platform host (older emails use it). On
+>     another client's domain they redirect to their own.
+>   - Every link we generate uses the canonical domain: page, share image,
+>     LinkedIn share and Add-to-profile, JSON, claim emails, reminders, CLI
+>     and API output. Sign-in and invitation links stay on the platform host.
+> - **Data:** clients and certificates carry their canonical domain (a
+>   subquery in the existing selects), so building links needs no extra
+>   queries. No migration was needed.
+> - **TLS:**
+>   - `/internal/tls-ask` answers 200 for the platform host and verified
+>     client domains, retired ones included (their links still redirect over
+>     HTTPS).
+>   - It refuses relayed requests (those with `X-Forwarded-For`).
+>   - `deploy/Caddyfile` adds `on_demand_tls { ask … }` and an `https://`
+>     catch-all site with `tls { on_demand }`.
+>   - Tested against a real Caddy 2.8.4 with a local CA. Verified domains got
+>     certificates; unverified and unknown ones didn't.
+> - **Leftover:** the `clients.brand` column from migration 002 is unused
+>   (designs replaced it). Migrations are checksummed, so it stays.
+
 ### Public (unchanged paths, now branded per client)
 
 `/`, `/verify`, `/c/{id}`, `/c/{id}/og.png`, `/c/{id}/credential.json`,
@@ -245,6 +280,46 @@ per IP.
 | `…/audit` | This client's audit log |
 | `…/export` | Download all certificates as CSV or JSON; later a static-site bundle |
 
+> **As built in Milestone 4:**
+> - **Pages:** Overview (stats, recent certificates and activity), Certificates
+>   (search, filters, paging, CSV/JSON export), Issue, Cohorts and roster,
+>   Courses, Designs, Team (admins and the audit log), Settings, and API.
+> - **Name corrections are in place, not reissue-and-redirect.** The ID, URL
+>   and LinkedIn entry don't change; the fix is stamped on the certificate
+>   (`name_corrected_at`) and the old and new names are in the audit log.
+>   Reissuing would have meant rebuilding the certificates table around its
+>   one-certificate-per-student-per-cohort rule, for no benefit to the student.
+> - **Issuing:** the dry run marks every row (new, already issued, repeated in
+>   the file, error) and shows every problem at once. Confirming re-checks the
+>   file server-side, so a stale preview can't cause a partial issue.
+> - **Designs:** heading, wording, accent color, logo and up to two signatories
+>   (name, title, optional signature image). Each certificate keeps a snapshot
+>   of its design when it's issued (`design_snapshot`), so editing a design
+>   never changes certificates already shared.
+> - **Uploads:** PNG and JPEG only, 2 MB max. Images are decoded, checked
+>   against a pixel budget (to stop decompression bombs), scaled down and
+>   re-encoded as PNG, so uploaded bytes are never served. White backgrounds on
+>   signatures become transparent. Images are served from `/assets/{id}.png`
+>   and cached as immutable.
+> - **Accent color with no inline CSS:** the color comes from a tiny cacheable
+>   stylesheet, `/theme/{rrggbb}.css`, because the CSP forbids inline styles.
+> - **Reminders:** "Remind unclaimed" sends each student a fresh link and
+>   skips anyone emailed in the last day. It also counts as the automatic
+>   reminder.
+> - **Settings** covers name, site, blurb, LinkedIn ID, reply-to and
+>   reminders. The ID prefix and slug stay with the super admin.
+> - **Export** cells that start with `= + - @` get a leading `'`, so a
+>   spreadsheet can't run them as formulas.
+> - **Audit log:** it's on the Team page, rather than a separate page.
+> - **API tokens:** `cfk_…` tokens are shown once and stored as hashes. They
+>   record when they were last used, are rate-limited (120 per minute per
+>   token), and their actions are audited as `api-token:<name>`.
+> - **`/api/v1` (§4 table):** it reuses the platform API's handlers. Issuing
+>   is `POST /api/v1/import` (CSV); a JSON single-issue endpoint is left for
+>   the Horizon integration.
+> - **Not built:** the per-certificate events timeline. The detail page shows
+>   per-kind totals instead.
+
 ### Super console — `/super/…`
 
 | Page | What it does |
@@ -255,6 +330,54 @@ per IP.
 | `/super/users` | All users; disable; grant or revoke super admin |
 | `/super/audit` | Global audit log, filterable |
 | `/super/system` | Version, migrations, Litestream status, outbox (retry failed), disk usage |
+
+> **As built in Milestone 5:**
+> - **Pages:** Overview, Clients, Client, People, Audit log and System, with
+>   a tab row for moving between them.
+> - **Overview:** totals, a table of clients with each one's numbers, and
+>   "needs attention" (failed emails, platform admins without two-step).
+>   "Last backup" waits for Litestream (Milestone 7).
+> - **Acting as a client is explicit.** A platform admin who isn't a member
+>   sees an "Act as …?" page instead of the console, and changes are refused
+>   (403) until they choose. The choice is stored on the session
+>   (`sessions.acting_client_id`), one client at a time.
+>   - Starting and stopping are audited (`client.act_as`, `client.act_as_end`).
+>   - Every page shows a banner with a Stop button, and every action is
+>     audited with `impersonated = 1`.
+>   - While acting, a platform admin can revoke the client's API tokens but
+>     not create them, because a token would act as the client without
+>     recording who made it.
+> - **Clients are never deleted:** certificate links and the append-only audit
+>   log refer to them. Suspending takes an optional reason, shown on the
+>   client's page and kept in the audit log. A suspended client can't issue
+>   certificates or send reminders. Its certificates stay online, and its
+>   admins can still sign in.
+> - **ID prefix:** it can be edited on the client page until the first
+>   certificate, then it's shown as fixed (the trigger from M1 enforces it).
+> - **Custom domains:** stored in `client_domains` (§3), along with the rules
+>   that protect them:
+>   - The DNS check passes if the host is a CNAME to the platform host or
+>     resolves to the same address.
+>   - Manual verification, for setups behind a proxy, needs a confirmation
+>     tick and is recorded as `manual`.
+>   - Only a verified domain can be the one used for links, and at most one
+>     per client.
+>   - Verified domains can't be deleted or moved to another client (database
+>     triggers). Unverified typos can be deleted.
+>   - Serving certificates on these domains, and the Caddy `ask` endpoint,
+>     are Milestone 6.
+> - **People:** search and filter; a person's page shows their clients, live
+>   sessions and recent actions.
+>   - Actions: disable or enable, sign out everywhere, reset two-step, and
+>     grant or revoke platform admin.
+>   - None of these work on your own account here, and the last platform
+>     admin can't be removed.
+> - **Audit log:** filter by client (or platform-only), who, and action
+>   prefix, with paging.
+> - **System:** database size, write-ahead log, reclaimable space, applied
+>   migrations, and the pre-migration snapshots on disk, alongside the email
+>   queue from M3. Litestream status comes with M7.
+> - **CLI:** `client suspend` takes `-reason`.
 
 ### Machine API — `/api/v1/…` (client API token; the token implies the client)
 
@@ -374,9 +497,9 @@ Effort estimates are for focused build time and are rough.
 | **1** ✅ | **Multi-tenant schema** (done 2026-10-06, as migration 002 rather than a rewritten 001; see §3) | Migration `002_multitenant.sql` with `clients` and composite FKs; `Scope`-required store API; per-client ID prefixes; tenant-isolation test suite passes | 3–4 d |
 | **2** ✅ | **Accounts and roles** (done 2026-10-06; see the note in §2) | Users, magic-link login, sessions, CSRF, TOTP for super admins, invitations, `authz.Can`, audit log, rate limits, `superadmin add` CLI | 4–5 d |
 | **3** ✅ | **Email** (done 2026-10-06; see the note in §6) | Outbox, worker, SMTP provider, four templates, bounce webhook, dev mode that logs emails instead of sending | 2 d |
-| **4** | **Client console** | Courses, designs with live preview, CSV dry-run issue, cohort roster, certificate detail (revoke, reissue, resend), team, settings, stats, export, API tokens | 7–10 d |
-| **5** | **Super console** | Client CRUD, suspend, domains, first-admin invite, act-as with banner and audit, users, global audit, system page | 3–4 d |
-| **6** | **Per-client public experience** | Branded certificate page and share image driven by `design_snapshot`; host-based routing; canonical redirects; Caddy `ask` endpoint | 3–4 d |
+| **4** ✅ | **Client console** (done 2026-10-06; see the note in §4) | Courses, designs with live preview, CSV dry-run issue, cohort roster, certificate detail (revoke, reissue, resend), team, settings, stats, export, API tokens | 7–10 d |
+| **5** ✅ | **Super console** (done 2026-10-06; see the note in §4) | Client CRUD, suspend, domains, first-admin invite, act-as with banner and audit, users, global audit, system page | 3–4 d |
+| **6** ✅ | **Per-client public experience** (done 2026-10-06; design-driven pages in M4, domains in M6; see the note in §4) | Branded certificate page and share image driven by `design_snapshot`; host-based routing; canonical redirects; Caddy `ask` endpoint | 3–4 d |
 | **7** | **Production hardening** | Deployed on the chosen host; Litestream and nightly snapshots; restore drill done; monitoring and alerts; security checklist walked through; small load test | 3–4 d |
 | **8** | **Launch** | Zip Code onboarded (3 courses, 3 designs), LinkedIn org ID set, previews checked in LinkedIn Post Inspector, pilot cohort issued and claimed; then TwinArrows onboarded | 2–3 d |
 | **9** | **After launch** | Open Badges 3.0 signing (Ed25519 per client, `/issuers/{slug}`); Horizon integration through `/api/v1`; static-export fallback; student portal ("all my certificates" by email login); optional PDF | ongoing |

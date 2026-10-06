@@ -57,6 +57,17 @@ func (s *Store) ListAudit(ctx context.Context, sc Scope, limit int) ([]AuditEntr
 	return s.listAudit(ctx, auditSelect+` WHERE a.client_id = ? ORDER BY a.id DESC LIMIT ?`, clientID, limit)
 }
 
+// ListAuditForTarget returns the scoped client's audit entries about one
+// thing (e.g. a certificate), newest first.
+func (s *Store) ListAuditForTarget(ctx context.Context, sc Scope, targetType, targetID string, limit int) ([]AuditEntry, error) {
+	clientID, err := sc.id()
+	if err != nil {
+		return nil, err
+	}
+	return s.listAudit(ctx, auditSelect+` WHERE a.client_id = ? AND a.target_type = ? AND a.target_id = ?
+		ORDER BY a.id DESC LIMIT ?`, clientID, targetType, targetID, limit)
+}
+
 // ListAllAudit returns the most recent audit entries across the platform.
 func (s *Store) ListAllAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
 	return s.listAudit(ctx, auditSelect+` ORDER BY a.id DESC LIMIT ?`, limit)

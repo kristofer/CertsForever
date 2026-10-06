@@ -1,10 +1,13 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 
 	"certsforever/internal/emails"
 	"certsforever/internal/importer"
@@ -33,6 +36,43 @@ func (s *Server) scoped(h scopedHandler) http.HandlerFunc {
 }
 
 // storeError maps store errors to HTTP statuses.
+// apiToken guards the client API with a client's own token. The scope
+// comes from the token, never the URL. Actions are audited as
+// "api-token:<name>".
+func (s *Server) apiToken(h scopedHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := s.clientIP(r)
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		var sc store.Scope
+		var tok *store.APIToken
+		err := store.ErrNotFound
+		if ok {
+			sc, tok, err = s.store.ScopeForAPIToken(r.Context(), got)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			if !s.limits.adminToken.Allow(ip) {
+				writeJSONError(w, http.StatusTooManyRequests, "too many failed attempts")
+				return
+			}
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if err != nil {
+			s.log.Error("api token", "err", err)
+			writeJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !s.limits.api.Allow(strconv.FormatInt(tok.ID, 10)) {
+			writeJSONError(w, http.StatusTooManyRequests, "rate limit: slow down")
+			return
+		}
+		h(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, "api-token:"+tok.Name)), sc)
+	})
+}
+
+// actorKey carries a non-user actor name (e.g. an API token) to audit().
+type actorKey struct{}
+
 func (s *Server) storeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -187,6 +227,13 @@ func CertificateReadyEmail(q *outbox.Queue, p emails.Platform, c store.Client, t
 	return q.Prepare("certificate_ready", m, "certificate", certID)
 }
 
+// clientBaseURL is the base for a client's public links (its custom domain
+// or the platform's).
+func (s *Server) clientBaseURL(sc store.Scope) string {
+	c := sc.Client()
+	return c.PublicBase(s.cfg.BaseURL)
+}
+
 // ClaimURL builds the student's private claim link.
 func ClaimURL(baseURL, token string) string { return baseURL + "/claim/" + token }
 
@@ -206,7 +253,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request, sc store.S
 	if notify {
 		hook = func(res store.IssueResult) (*store.NewEmail, error) {
 			return CertificateReadyEmail(s.queue, s.platform(), sc.Client(), res.Email, res.FullName, res.CourseTitle,
-				res.CertificateID, ClaimURL(s.cfg.BaseURL, res.ClaimToken))
+				res.CertificateID, ClaimURL(s.clientBaseURL(sc), res.ClaimToken))
 		}
 	}
 	results, err := s.store.IssueAndNotify(r.Context(), sc, reqs, hook)
@@ -226,9 +273,9 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request, sc store.S
 	s.audit(r, nil, sc, "certificates.issue", "", "", map[string]any{"rows": len(results), "issued": issued, "emailed": notify})
 	out := make([]IssuedLink, len(results))
 	for i, res := range results {
-		out[i] = IssuedLink{IssueResult: res, CertificateURL: s.certURL(res.CertificateID)}
+		out[i] = IssuedLink{IssueResult: res, CertificateURL: s.clientCertURL(sc, res.CertificateID)}
 		if res.ClaimToken != "" {
-			out[i].ClaimURL = ClaimURL(s.cfg.BaseURL, res.ClaimToken)
+			out[i].ClaimURL = ClaimURL(s.clientBaseURL(sc), res.ClaimToken)
 			out[i].Emailed = notify
 		}
 	}
@@ -237,7 +284,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request, sc store.S
 
 func (s *Server) handleListCerts(w http.ResponseWriter, r *http.Request, sc store.Scope) {
 	q := r.URL.Query()
-	certs, err := s.store.ListCertificates(r.Context(), sc, q.Get("course"), q.Get("cohort"))
+	certs, _, err := s.store.SearchCertificates(r.Context(), sc, certFilter(q))
 	if err != nil {
 		s.storeError(w, err)
 		return
@@ -281,7 +328,7 @@ func (s *Server) handleNewClaimLink(w http.ResponseWriter, r *http.Request, sc s
 		token, err = s.store.NewClaimLinkAndNotify(r.Context(), sc, r.PathValue("id"),
 			func(c *store.Certificate, tok string) (*store.NewEmail, error) {
 				return CertificateReadyEmail(s.queue, s.platform(), sc.Client(), c.Email, c.RecipientName, c.CourseTitle,
-					c.ID, ClaimURL(s.cfg.BaseURL, tok))
+					c.ID, ClaimURL(c.PublicBase(s.cfg.BaseURL), tok))
 			})
 		if err == nil {
 			s.queue.Wake()
@@ -294,7 +341,7 @@ func (s *Server) handleNewClaimLink(w http.ResponseWriter, r *http.Request, sc s
 		return
 	}
 	s.audit(r, nil, sc, "certificate.claim_link", "certificate", r.PathValue("id"), map[string]any{"emailed": notify})
-	writeJSON(w, http.StatusOK, map[string]string{"claim_url": ClaimURL(s.cfg.BaseURL, token)})
+	writeJSON(w, http.StatusOK, map[string]string{"claim_url": ClaimURL(s.clientBaseURL(sc), token)})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request, sc store.Scope) {

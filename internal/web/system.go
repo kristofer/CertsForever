@@ -16,6 +16,8 @@ import (
 
 type systemPage struct {
 	base
+	Tab          string
+	Info         *store.SystemInfo
 	Notice       string
 	Error        string
 	Version      string
@@ -34,14 +36,16 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, a *auth) {
 
 func (s *Server) renderSystem(w http.ResponseWriter, r *http.Request, a *auth, errMsg string, status int) {
 	ctx := r.Context()
-	p := systemPage{base: s.consoleBase(a), Notice: notice(r), Error: errMsg, Version: buildinfo.Get().String(),
+	p := systemPage{base: s.consoleBase(a), Tab: "system", Notice: notice(r), Error: errMsg, Version: buildinfo.Get().String(),
 		EmailMode: s.emailMode, WebhookOn: s.cfg.BounceWebhookToken != ""}
 	var err error
 	if p.Schema, err = s.store.Health(ctx); err == nil {
 		if p.Counts, err = s.store.OutboxCounts(ctx); err == nil {
 			if p.Failed, err = s.store.ListEmails(ctx, "failed", 50); err == nil {
 				if p.Recent, err = s.store.ListEmails(ctx, "", 25); err == nil {
-					p.Suppressions, err = s.store.ListSuppressions(ctx, 100)
+					if p.Suppressions, err = s.store.ListSuppressions(ctx, 100); err == nil {
+						p.Info, err = s.store.GetSystemInfo(ctx)
+					}
 				}
 			}
 		}

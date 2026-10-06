@@ -1,0 +1,67 @@
+{{/* Shared pieces for console pages. */}}
+
+{{define "audit"}}
+{{if .}}
+<table class="table table-compact">
+  <thead><tr><th>When</th><th>Who</th><th>What</th><th>Target</th></tr></thead>
+  <tbody>{{range .}}
+    <tr><td>{{datetime .At}}</td><td>{{.Actor}}{{if .Impersonated}} <span class="tag">platform</span>{{end}}</td>
+      <td><code>{{.Action}}</code>{{with .ClientSlug}} <span class="muted">{{.}}</span>{{end}}{{with .Details}}<br><span class="muted small">{{range $k, $v := .}}{{$k}}: {{$v}} {{end}}</span>{{end}}</td><td>{{.TargetID}}</td></tr>
+  {{end}}</tbody>
+</table>
+{{else}}<p class="muted">Nothing recorded yet.</p>{{end}}
+{{end}}
+
+{{define "clienthead"}}
+{{if .Impersonating}}
+<div class="status status-acting" role="status">
+  <span>You're acting as <strong>{{.Client.Name}}</strong> as a platform administrator. Your changes are recorded in its audit log.</span>
+  <form method="post" action="/super/act-as/stop"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="btn btn-sm btn-ghost" type="submit">Stop acting</button></form>
+</div>
+{{end}}
+<p class="eyebrow">Client · {{.Client.IDPrefix}}{{if ne .Client.Status "active"}} · <span class="tag">{{.Client.Status}}</span>{{end}}</p>
+<h1 class="page-title">{{.Client.Name}}</h1>
+<nav class="subnav" aria-label="{{.Client.Name}}">
+  {{$c := printf "/admin/%s" .Client.Slug}}
+  <a href="{{$c}}"{{if eq .Tab "overview"}} aria-current="page"{{end}}>Overview</a>
+  <a href="{{$c}}/certificates"{{if eq .Tab "certificates"}} aria-current="page"{{end}}>Certificates</a>
+  <a href="{{$c}}/issue"{{if eq .Tab "issue"}} aria-current="page"{{end}}>Issue</a>
+  <a href="{{$c}}/cohorts"{{if eq .Tab "cohorts"}} aria-current="page"{{end}}>Cohorts</a>
+  <a href="{{$c}}/courses"{{if eq .Tab "courses"}} aria-current="page"{{end}}>Courses</a>
+  <a href="{{$c}}/designs"{{if eq .Tab "designs"}} aria-current="page"{{end}}>Designs</a>
+  <a href="{{$c}}/team"{{if eq .Tab "team"}} aria-current="page"{{end}}>Team</a>
+  <a href="{{$c}}/settings"{{if eq .Tab "settings"}} aria-current="page"{{end}}>Settings</a>
+  <a href="{{$c}}/tokens"{{if eq .Tab "tokens"}} aria-current="page"{{end}}>API</a>
+</nav>
+{{with .Notice}}<div class="status status-ok" role="status">{{.}}</div>{{end}}
+{{with .Error}}<p class="status status-revoked" role="alert">{{.}}</p>{{end}}
+{{end}}
+
+{{define "certstatus"}}{{if .Revoked}}<span class="pill pill-bad">revoked</span>{{else if .Public}}<span class="pill pill-ok">public</span>{{else if .ClaimedAt}}<span class="pill">opened</span>{{else}}<span class="pill pill-wait">not opened</span>{{end}}{{if .EmailBlocked}} <span class="tag" title="Mail to {{.Email}} bounced or was reported; nothing is sent to it">email bounced</span>{{end}}{{end}}
+
+{{define "certrows"}}
+<table class="table">
+  <thead><tr><th>Recipient</th><th>Course · cohort</th><th>Issued</th><th>Status</th><th>ID</th></tr></thead>
+  <tbody>{{range .Certs}}
+    <tr><td><a href="/admin/{{$.Client.Slug}}/certificates/{{.ID}}">{{.RecipientName}}</a><br><span class="muted small">{{.Email}}</span></td>
+      <td>{{.CourseTitle}}<br><span class="muted small">{{.CohortName}}</span></td>
+      <td>{{date .IssuedOn}}</td><td>{{template "certstatus" .}}</td><td><code class="small">{{.ID}}</code></td></tr>
+  {{else}}<tr><td colspan="5" class="muted">No certificates match.</td></tr>{{end}}</tbody>
+</table>
+{{end}}
+
+{{define "superhead"}}
+<p class="eyebrow">Platform administration</p>
+<h1 class="page-title">{{.Org}}</h1>
+<nav class="subnav" aria-label="Platform">
+  <a href="/super"{{if eq .Tab "overview"}} aria-current="page"{{end}}>Overview</a>
+  <a href="/super/clients"{{if eq .Tab "clients"}} aria-current="page"{{end}}>Clients</a>
+  <a href="/super/users"{{if eq .Tab "users"}} aria-current="page"{{end}}>People</a>
+  <a href="/super/audit"{{if eq .Tab "audit"}} aria-current="page"{{end}}>Audit log</a>
+  <a href="/super/system"{{if eq .Tab "system"}} aria-current="page"{{end}}>System</a>
+</nav>
+{{with .Notice}}<div class="status status-ok" role="status">{{.}}</div>{{end}}
+{{with .Error}}<p class="status status-revoked" role="alert">{{.}}</p>{{end}}
+{{end}}
+
+{{define "clientstatus"}}{{if eq .Status "active"}}<span class="pill pill-ok">active</span>{{else}}<span class="pill pill-bad">{{.Status}}</span>{{end}}{{end}}

@@ -159,9 +159,12 @@ func (s *Server) super(h authedHandler) http.HandlerFunc {
 	})
 }
 
-// client wraps handlers for one client's console. Members get in; super
-// admins get in as "impersonating" (shown on the page, recorded in the audit
-// log). Everyone else gets 404, which doesn't reveal that the client exists.
+// client wraps handlers for one client's console. Members get in. A super
+// admin who isn't a member gets in only after choosing to act as the client
+// (recorded on the session and in the audit log); until then GETs show the
+// "act as" page and POSTs are refused. While acting, a banner shows and
+// every action is audited as impersonated. Everyone else gets 404, which
+// doesn't reveal that the client exists.
 func (s *Server) client(h clientHandler) http.HandlerFunc {
 	return s.user(func(w http.ResponseWriter, r *http.Request, a *auth) {
 		sc, err := s.store.Scope(r.Context(), r.PathValue("client"))
@@ -180,6 +183,15 @@ func (s *Server) client(h clientHandler) http.HandlerFunc {
 		}
 		if !member && !a.user.IsSuper {
 			s.message(w, http.StatusNotFound, "Not found", "There's nothing here.")
+			return
+		}
+		if !member && a.sess.ActingClientID != sc.Client().ID {
+			if r.Method != http.MethodGet {
+				s.message(w, http.StatusForbidden, "Not acting as this client",
+					"Open the client's console and choose to act as it first.")
+				return
+			}
+			s.renderActAs(w, r, a, sc)
 			return
 		}
 		a.impersonating = !member
@@ -209,6 +221,8 @@ func (s *Server) audit(r *http.Request, a *auth, sc store.Scope, action, targetT
 	case a != nil:
 		id := a.user.ID
 		e.ActorUserID, e.Actor, e.Impersonated = &id, a.user.Email, a.impersonating
+	case r.Context().Value(actorKey{}) != nil:
+		e.Actor = r.Context().Value(actorKey{}).(string)
 	case r.Header.Get("Authorization") != "":
 		e.Actor = "admin-token"
 	default:

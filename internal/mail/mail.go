@@ -108,6 +108,14 @@ func (r *Recorder) Send(_ context.Context, m Message) error {
 }
 
 // Last returns the most recent message (zero Message if none).
+// All returns a copy of the messages sent so far.
+func (r *Recorder) All() []Message {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]Message(nil), r.Sent...)
+}
+
+// Last returns the most recent message.
 func (r *Recorder) Last() Message {
 	r.mu.Lock()
 	defer r.mu.Unlock()

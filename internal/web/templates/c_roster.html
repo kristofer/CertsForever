@@ -1,0 +1,27 @@
+{{define "title"}}{{.Cohort}} · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+<p><a href="/admin/{{.Client.Slug}}/cohorts">← Cohorts</a></p>
+<section class="panel">
+  <h2>{{.Cohort}} <span class="muted">· {{(index .Certs 0).CourseTitle}}</span></h2>
+  <table class="table">
+    <thead><tr><th>Recipient</th><th>Status</th><th>Opened</th><th>Last email</th></tr></thead>
+    <tbody>{{range .Certs}}
+      <tr><td><a href="/admin/{{$.Client.Slug}}/certificates/{{.ID}}">{{.RecipientName}}</a><br><span class="muted small">{{.Email}}</span></td>
+        <td>{{template "certstatus" .}}</td>
+        <td>{{with .ClaimedAt}}{{date .}}{{else}}<span class="muted">–</span>{{end}}</td>
+        <td>{{with index $.EmailState .ID}}{{.}}{{else}}<span class="muted">none</span>{{end}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  {{if .MailOn}}
+  {{if .Unclaimed}}
+  <form method="post" action="/admin/{{.Client.Slug}}/cohorts/remind?course={{.Course}}&amp;cohort={{.Cohort}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button class="btn btn-ghost" type="submit">Remind {{.Unclaimed}} who haven't opened theirs</button>
+    <p class="hint">Each gets a fresh link. Anyone emailed in the last day is skipped.</p>
+  </form>
+  {{else}}<p class="muted">Everyone has opened their certificate.</p>{{end}}
+  {{end}}
+</section>
+{{end}}

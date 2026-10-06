@@ -1,16 +1,19 @@
 {{define "title"}}System · {{.Org}}{{end}}
 
 {{define "content"}}
-<p class="eyebrow">Platform administration</p>
-<h1 class="page-title">System</h1>
-{{with .Notice}}<div class="status status-ok" role="status">{{.}}</div>{{end}}
-{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{template "superhead" .}}
 
 <section class="panel">
   <dl class="kv">
     <dt>Version</dt><dd>{{.Version}}</dd>
     <dt>Schema</dt><dd>{{.Schema}}</dd>
     <dt>Email</dt><dd>{{.EmailMode}}</dd>
+    {{with .Info}}
+    <dt>Database</dt><dd><code>{{.Path}}</code>: {{bytes .SizeBytes}}{{if .WALBytes}} + {{bytes .WALBytes}} write-ahead log{{end}}{{if .FreeBytes}} ({{bytes .FreeBytes}} reclaimable){{end}}</dd>
+    <dt>Migrations</dt><dd>{{range $i, $m := .Migrations}}{{if $i}}, {{end}}{{$m.Version}}{{end}} <span class="muted small">(latest applied {{with $l := index .Migrations (sub1 (len .Migrations))}}{{datetime $l.AppliedAt}}{{end}})</span></dd>
+    <dt>Snapshots</dt><dd>{{range .Snapshots}}<code class="small">{{.Name}}</code> {{bytes .Bytes}}<br>{{else}}<span class="muted">none</span>{{end}}
+      {{if .Snapshots}}<span class="hint">Taken before each upgrade. Delete old ones once the new version has run fine for a while (runbook §3).</span>{{end}}</dd>
+    {{end}}
     <dt>Bounce webhook</dt><dd>{{if .WebhookOn}}on (<code>POST /hooks/email/bounce</code>){{else}}off (set <code>CERTS_BOUNCE_WEBHOOK_TOKEN</code>){{end}}</dd>
   </dl>
 </section>

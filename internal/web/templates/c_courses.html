@@ -1,0 +1,50 @@
+{{define "title"}}Courses · {{.Client.Name}}{{end}}
+
+{{define "content"}}
+{{template "clienthead" .}}
+
+<section class="panel">
+  <h2>Courses</h2>
+  {{if .Courses}}
+  <table class="table">
+    <thead><tr><th>Course</th><th>Short name</th><th>Design</th><th class="num">Certificates</th><th></th></tr></thead>
+    <tbody>{{range .Courses}}
+      <tr><td>{{.Title}}{{with .Skills}}<br><span class="muted small">{{join . ", "}}</span>{{end}}</td><td><code>{{.Slug}}</code></td>
+        <td>{{if .DesignName}}<a href="/admin/{{$.Client.Slug}}/designs/{{.DesignID}}">{{.DesignName}}</a>{{else}}<span class="muted">default</span>{{end}}</td>
+        <td class="num">{{.Certificates}}</td>
+        <td class="row-actions"><a href="?edit={{.Slug}}#course-form">Edit</a>
+          {{if eq .Certificates 0}}<form method="post" action="/admin/{{$.Client.Slug}}/courses/{{.Slug}}/delete">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn-link" type="submit">Delete</button></form>{{end}}</td></tr>
+    {{end}}</tbody>
+  </table>
+  <p class="hint">Changing a title or design affects certificates issued from now on. Certificates already issued keep what they were issued with.</p>
+  {{else}}<p class="muted">No courses yet. Add one for each certificate you give.</p>{{end}}
+</section>
+
+<section class="panel" id="course-form">
+  <h2>{{if .Editing}}Edit {{.Edit.Title}}{{else}}Add a course{{end}}</h2>
+  <form class="stack" method="post" action="/admin/{{.Client.Slug}}/courses">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{if .Editing}}<input type="hidden" name="editing" value="1"><input type="hidden" name="slug" value="{{.Edit.Slug}}">
+    <p class="muted">Short name: <code>{{.Edit.Slug}}</code> (used in CSV files; can't change)</p>
+    {{else}}
+    <label>Short name <span class="hint">used in CSV files, e.g. <code>java</code>: lowercase letters, digits, dashes</span>
+      <input name="slug" value="{{.Edit.Slug}}" required pattern="[a-z0-9][a-z0-9\-]{1,39}" maxlength="40"></label>
+    {{end}}
+    <label>Title <span class="hint">printed on the certificate and on LinkedIn</span>
+      <input name="title" value="{{.Edit.Title}}" required maxlength="120"></label>
+    <label>Description <span class="hint">optional, for your records</span>
+      <input name="description" value="{{.Edit.Description}}" maxlength="500"></label>
+    <label>Skills <span class="hint">comma-separated, shown on the certificate</span>
+      <input name="skills" value="{{join .Edit.Skills ", "}}" maxlength="500"></label>
+    <label>Hours <span class="hint">optional</span>
+      <input name="hours" type="number" min="0" max="10000" value="{{if .Edit.Hours}}{{.Edit.Hours}}{{end}}"></label>
+    <label>Design
+      <select name="design_id"><option value="0">Default</option>
+        {{range .Designs}}<option value="{{.ID}}"{{if eq .ID $.Edit.DesignID}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select></label>
+    <div class="actions"><button class="btn" type="submit">{{if .Editing}}Save course{{else}}Add course{{end}}</button>
+      {{if .Editing}}<a class="btn btn-ghost" href="/admin/{{.Client.Slug}}/courses">Cancel</a>{{end}}</div>
+  </form>
+</section>
+{{end}}
