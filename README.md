@@ -5,7 +5,21 @@ students: a permanent public page per certificate, one-click "Add to LinkedIn
 profile", a generated share image, and referral tracking back to the program
 site.
 
-Design, schema and routes are in [DESIGN.md](DESIGN.md).
+Design, schema and routes are in [DESIGN.md](DESIGN.md). The path to a
+multi-client production service is [docs/PRODUCTION_PLAN.md](docs/PRODUCTION_PLAN.md);
+operations are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
+## Run it with Docker
+
+```sh
+cp .env.example .env     # for a local try: CERTS_ENV=development, CERTS_BASE_URL=http://localhost:8080
+docker compose up -d --build
+docker compose exec certsforever certsforever demo
+```
+
+On a server with a domain, `docker compose --profile tls up -d --build` adds
+Caddy with automatic HTTPS. Backups, upgrades and restores are covered in
+the [runbook](docs/RUNBOOK.md).
 
 ## Quick start
 
@@ -41,20 +55,29 @@ Other commands:
 ```sh
 certsforever revoke -reason "issued in error" ZCW-XXXXXXXXXX
 certsforever claim-link ZCW-XXXXXXXXXX     # replace a lost claim link
+
+certsforever backup backups/certs-2026-10-06.db   # consistent online backup
+certsforever restore -yes backups/certs-2026-10-06.db   # server stopped first
+certsforever migrate                       # apply migrations without serving
+certsforever healthcheck                   # exit 0 if the local server is ready
+certsforever version
 ```
 
 ## Configuration
 
 | variable | default | |
 |---|---|---|
+| `CERTS_ENV` | `development` | `production` requires an https `CERTS_BASE_URL` on a real domain (the Docker image defaults to `production`) |
 | `CERTS_ADDR` | `:8080` | listen address |
 | `CERTS_DB` | `certs.db` | SQLite file |
 | `CERTS_BASE_URL` | `http://localhost:8080` | public origin. **Set this in production**; it goes into every link and share image |
-| `CERTS_ADMIN_TOKEN` | *(empty: admin API off)* | bearer token for `/admin/api/*` |
+| `CERTS_ADMIN_TOKEN` | *(empty: admin API off)* | bearer token for `/admin/api/*`, 32+ chars; or `CERTS_ADMIN_TOKEN_FILE` |
 | `CERTS_LINKEDIN_ORG_ID` | *(empty)* | Zip Code's numeric LinkedIn company ID, so the logo shows on profiles |
 | `CERTS_SITE_URL` | `https://zipcodewilmington.com` | "Learn about the program" destination (UTM-tagged) |
 | `CERTS_ORG_NAME` | `Zip Code Wilmington` | |
 | `CERTS_ORG_BLURB` | *(one sentence)* | shown on every certificate page |
+
+Configuration is validated at startup, and every problem is reported at once.
 
 ## Admin API
 
@@ -71,21 +94,30 @@ curl -H "Authorization: Bearer $T" localhost:8080/admin/api/stats
 
 ```
 cmd/certsforever/        CLI + server entry point
-internal/store/          SQLite access, embedded migrations
+internal/config/         env config, validation, *_FILE secrets
+internal/buildinfo/      version stamped at build time
+internal/store/          SQLite: writer/reader pools, checksummed migrations, backup/restore
 internal/web/            handlers, templates, static assets (embedded)
 internal/ogimage/        1200x627 share image (pure Go, bundled Go fonts)
 internal/linkedin/       Add-to-profile and share URL builders
 internal/certid/         certificate ID generation/normalization
 internal/importer/       cohort CSV parsing
+scripts/docker-smoke.sh  end-to-end check of a built image (used by CI)
+deploy/Caddyfile         TLS reverse proxy for `docker compose --profile tls`
+.github/                 CI, release-to-GHCR, Dependabot
 ```
 
 Everything (templates, CSS, fonts, migrations) is embedded, so deployment is
 one binary plus a SQLite file. Back up the SQLite file; it is the registry of
 record.
 
-## Deploying
+## Development checks
 
-`docker build -t certsforever .` produces a small image that keeps its
-database in `/data`. Put it behind TLS (Caddy, a load balancer, or Fly.io and
-similar), set `CERTS_BASE_URL` to the permanent `https://` origin, and mount
-`/data` on a persistent volume.
+These are the same checks CI runs:
+
+```sh
+gofmt -l . && go vet ./... && go test -race ./...
+go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+docker build -t certsforever:local . && scripts/docker-smoke.sh certsforever:local
+```

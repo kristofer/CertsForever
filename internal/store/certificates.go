@@ -75,7 +75,7 @@ func scanCert(r rowScanner) (*Certificate, error) {
 
 // GetCertificate fetches a certificate by its public ID.
 func (s *Store) GetCertificate(ctx context.Context, id string) (*Certificate, error) {
-	return scanCert(s.db.QueryRowContext(ctx, certSelect+` WHERE c.id = ?`, id))
+	return scanCert(s.rdb.QueryRowContext(ctx, certSelect+` WHERE c.id = ?`, id))
 }
 
 // GetCertificateByClaimToken fetches the certificate a claim token belongs to.
@@ -83,7 +83,7 @@ func (s *Store) GetCertificateByClaimToken(ctx context.Context, token string) (*
 	if token == "" {
 		return nil, ErrNotFound
 	}
-	return scanCert(s.db.QueryRowContext(ctx,
+	return scanCert(s.rdb.QueryRowContext(ctx,
 		certSelect+` WHERE c.claim_token_hash = ?`, hashToken(token)))
 }
 
@@ -91,7 +91,7 @@ func (s *Store) GetCertificateByClaimToken(ctx context.Context, token string) (*
 func (s *Store) ListCertificates(ctx context.Context, courseSlug, cohort string) ([]Certificate, error) {
 	q := certSelect + ` WHERE (? = '' OR co.slug = ?) AND (? = '' OR h.name = ?)
 		ORDER BY c.issued_on DESC, c.recipient_name`
-	rows, err := s.db.QueryContext(ctx, q, courseSlug, courseSlug, cohort, cohort)
+	rows, err := s.rdb.QueryContext(ctx, q, courseSlug, courseSlug, cohort, cohort)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s *Store) SetVisibility(ctx context.Context, id, visibility string) error 
 	if visibility != "public" && visibility != "private" {
 		return fmt.Errorf("invalid visibility %q", visibility)
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.wdb.ExecContext(ctx, `
 		UPDATE certificates
 		SET visibility = ?, claimed_at = COALESCE(claimed_at, ?)
 		WHERE id = ?`, visibility, nowUTC(), id)
@@ -123,7 +123,7 @@ func (s *Store) SetVisibility(ctx context.Context, id, visibility string) error 
 // Revoke marks a certificate revoked. Revoked public certificates stay
 // resolvable so anyone verifying them sees that they are no longer valid.
 func (s *Store) Revoke(ctx context.Context, id, reason string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.wdb.ExecContext(ctx, `
 		UPDATE certificates SET status = 'revoked', revoked_at = ?, revoke_reason = ?
 		WHERE id = ? AND status = 'active'`, nowUTC(), reason, id)
 	return affectedOne(res, err)
@@ -133,7 +133,7 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 // the email) and returns the new token. The old link stops working.
 func (s *Store) NewClaimLink(ctx context.Context, id string) (string, error) {
 	token, hash := newClaimToken()
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.wdb.ExecContext(ctx,
 		`UPDATE certificates SET claim_token_hash = ? WHERE id = ?`, hash, id)
 	if err := affectedOne(res, err); err != nil {
 		return "", err
@@ -178,7 +178,7 @@ type IssueResult struct {
 // It is idempotent per (student, cohort): re-importing the same CSV returns
 // the existing certificate IDs instead of creating duplicates.
 func (s *Store) Issue(ctx context.Context, reqs []IssueRequest) ([]IssueResult, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.wdb.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

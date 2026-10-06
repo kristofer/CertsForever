@@ -4,3 +4,8 @@
 *.db-wal
 links.csv
 .DS_Store
+.env
+backups/
+*.db.before-restore-*
+*.pre-*.db
+coverage.out

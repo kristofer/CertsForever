@@ -36,7 +36,7 @@ func (s *Store) CreateCourse(ctx context.Context, c Course) (int64, error) {
 		hours = sql.NullInt64{Int64: int64(c.Hours), Valid: true}
 	}
 	var id int64
-	err = s.db.QueryRowContext(ctx, `
+	err = s.wdb.QueryRowContext(ctx, `
 		INSERT INTO courses (slug, title, description, skills, hours)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(slug) DO UPDATE SET
@@ -56,7 +56,7 @@ func (s *Store) GetCourse(ctx context.Context, slug string) (*Course, error) {
 	var c Course
 	var skills string
 	var hours sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	err := s.rdb.QueryRowContext(ctx,
 		`SELECT id, slug, title, description, skills, hours FROM courses WHERE slug = ?`,
 		strings.ToLower(slug)).Scan(&c.ID, &c.Slug, &c.Title, &c.Description, &skills, &hours)
 	if errors.Is(err, sql.ErrNoRows) {

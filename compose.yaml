@@ -1,0 +1,61 @@
+# CertsForever with Docker Compose.
+#
+#   cp .env.example .env        # then edit it
+#   docker compose up -d --build
+#
+# With automatic HTTPS (Caddy + Let's Encrypt): set CERTS_DOMAIN in .env, point
+# its DNS at this host and open ports 80/443, then:
+#
+#   docker compose --profile tls up -d --build
+#
+# See docs/RUNBOOK.md for backups, upgrades and restores.
+
+services:
+  certsforever:
+    build:
+      context: .
+      args:
+        VERSION: ${CERTS_VERSION:-dev}
+    image: certsforever:${CERTS_VERSION:-dev}
+    env_file: .env
+    environment:
+      CERTS_DB: /data/certs.db
+      CERTS_ADDR: ":8080"
+    ports:
+      # Localhost only: Caddy (or your own proxy) terminates TLS in front.
+      - "127.0.0.1:${CERTS_PORT:-8080}:8080"
+    volumes:
+      - certs-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  caddy:
+    profiles: [tls]
+    image: caddy:2
+    environment:
+      CERTS_DOMAIN: ${CERTS_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      certsforever:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  certs-data:
+  caddy-data:
+  caddy-config:

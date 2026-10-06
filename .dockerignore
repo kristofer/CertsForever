@@ -1,0 +1,14 @@
+.git
+.github
+bin
+docs
+*.db
+*.db-shm
+*.db-wal
+*.db.before-restore-*
+links.csv
+.env
+.env.*
+NOTES.md
+compose.yaml
+deploy

@@ -1,5 +1,10 @@
 # CertsForever — design sketch
 
+> This describes the single-organization scaffold. The multi-client production
+> build (super admins, client admins, per-course designs) is planned in
+> [docs/PRODUCTION_PLAN.md](docs/PRODUCTION_PLAN.md), which supersedes this
+> document where they differ.
+
 Self-hosted completion certificates for Zip Code Wilmington. Students get a
 permanent public page they can add to LinkedIn; employers can verify it; and
 every shared link is a small, measurable referral back to the program.

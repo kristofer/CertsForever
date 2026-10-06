@@ -1,0 +1,9 @@
+# Used by `docker compose --profile tls`. CERTS_DOMAIN comes from .env.
+{$CERTS_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy certsforever:8080 {
+		# Ride out the ~1s restart during deploys.
+		lb_try_duration 10s
+	}
+}

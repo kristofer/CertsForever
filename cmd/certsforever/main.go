@@ -7,6 +7,14 @@
 //	certsforever claim-link ZCW-XXXXXXXXXX
 //	certsforever demo                          seed a sample public certificate
 //
+// Operations:
+//
+//	certsforever migrate                       apply pending migrations and exit
+//	certsforever backup DEST.db                consistent online backup (VACUUM INTO)
+//	certsforever restore SRC.db                replace the database (server must be stopped)
+//	certsforever healthcheck                   exit 0 if the local server is ready
+//	certsforever version
+//
 // Configuration comes from CERTS_* environment variables (see README).
 package main
 
@@ -18,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +34,7 @@ import (
 	"syscall"
 	"time"
 
+	"certsforever/internal/buildinfo"
 	"certsforever/internal/config"
 	"certsforever/internal/importer"
 	"certsforever/internal/store"
@@ -36,14 +46,39 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-	cfg := config.FromEnv()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var err error
-	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	cmd, args := os.Args[1], os.Args[2:]
+
+	// Commands that must work even with incomplete configuration.
+	switch cmd {
+	case "version":
+		fmt.Println("certsforever", buildinfo.Get())
+		return
+	case "healthcheck":
+		exit(healthcheck(ctx, config.FromEnv()))
+		return
+	case "-h", "--help", "help":
+		usage()
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "configuration error:\n "+strings.ReplaceAll(err.Error(), "\n", "\n "))
+		os.Exit(1)
+	}
+
+	switch cmd {
 	case "serve":
 		err = serve(ctx, cfg)
+	case "migrate":
+		err = migrate(ctx, cfg)
+	case "backup":
+		err = backup(ctx, cfg, args)
+	case "restore":
+		err = restore(ctx, cfg, args)
 	case "course":
 		err = course(ctx, cfg, args)
 	case "import":
@@ -54,12 +89,14 @@ func main() {
 		err = claimLink(ctx, cfg, args)
 	case "demo":
 		err = demo(ctx, cfg)
-	case "-h", "--help", "help":
-		usage()
 	default:
 		usage()
 		os.Exit(2)
 	}
+	exit(err)
+}
+
+func exit(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -75,16 +112,33 @@ commands:
   import       issue certificates from a cohort CSV
   revoke       revoke a certificate
   claim-link   issue a new claim link for a certificate
-  demo         seed a sample public certificate for local testing`)
+  demo         seed a sample public certificate for local testing
+
+operations:
+  migrate      apply pending database migrations and exit
+  backup       write a consistent backup:   backup /data/backups/certs-2026-10-06.db
+  restore      replace the database from a backup (stop the server first)
+  healthcheck  exit 0 if the server on CERTS_ADDR is ready (for Docker)
+  version      print the build version`)
 }
 
-func openStore(ctx context.Context, cfg config.Config) (*store.Store, error) {
-	return store.Open(ctx, cfg.DBPath)
+func openStore(ctx context.Context, cfg config.Config, log *slog.Logger) (*store.Store, error) {
+	st, err := store.Open(ctx, cfg.DBPath)
+	if err != nil {
+		return nil, err
+	}
+	if m := st.Migration; len(m.Applied) > 0 && log != nil {
+		log.Info("database migrated", "applied", m.Applied, "schema_version", m.Version, "snapshot", m.Snapshot)
+	}
+	return st, nil
 }
 
 func serve(ctx context.Context, cfg config.Config) error {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	st, err := openStore(ctx, cfg)
+	info := buildinfo.Get()
+	log.Info("starting", "version", info.Version, "commit", info.Commit, "go", info.Go, "env", cfg.Env)
+
+	st, err := openStore(ctx, cfg, log)
 	if err != nil {
 		return err
 	}
@@ -104,19 +158,128 @@ func serve(ctx context.Context, cfg config.Config) error {
 	if cfg.AdminToken == "" {
 		log.Warn("CERTS_ADMIN_TOKEN not set; admin API disabled")
 	}
+
+	// Keep the query planner's statistics fresh on long-running servers.
+	go func() {
+		t := time.NewTicker(24 * time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := st.Optimize(ctx); err != nil {
+					log.Warn("optimize", "err", err)
+				}
+			}
+		}
+	}()
+
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", cfg.Addr, "base_url", cfg.BaseURL, "db", cfg.DBPath)
+		log.Info("listening", "addr", cfg.Addr, "base_url", cfg.BaseURL, "db", cfg.DBPath,
+			"schema_version", st.Migration.Version)
 		errc <- srv.ListenAndServe()
 	}()
 	select {
 	case err := <-errc:
 		return err
 	case <-ctx.Done():
+		log.Info("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+func migrate(ctx context.Context, cfg config.Config) error {
+	st, err := store.Open(ctx, cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	m := st.Migration
+	if len(m.Applied) == 0 {
+		fmt.Printf("schema is current (version %d)\n", m.Version)
+		return nil
+	}
+	fmt.Printf("applied migrations %v; schema version %d\n", m.Applied, m.Version)
+	if m.Snapshot != "" {
+		fmt.Println("pre-migration snapshot:", m.Snapshot)
+	}
+	return nil
+}
+
+func backup(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: certsforever backup DEST.db")
+	}
+	st, err := store.Open(ctx, cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	start := time.Now()
+	if err := st.Backup(ctx, args[0]); err != nil {
+		return err
+	}
+	fi, err := os.Stat(args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Printf("backup written to %s (%d bytes, %s)\n", args[0], fi.Size(), time.Since(start).Round(time.Millisecond))
+	return nil
+}
+
+func restore(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+	yes := fs.Bool("yes", false, "confirm: the server is stopped and the current database may be replaced")
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		return errors.New("usage: certsforever restore -yes SRC.db   (stop the server first)")
+	}
+	if !*yes {
+		return errors.New("refusing to restore without -yes; stop the server first, then re-run with -yes")
+	}
+	if ready(ctx, cfg) == nil {
+		return errors.New("a server is still answering on CERTS_ADDR; stop it before restoring")
+	}
+	kept, err := store.Restore(ctx, fs.Arg(0), cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("restored %s from %s\n", cfg.DBPath, fs.Arg(0))
+	if kept != "" {
+		fmt.Println("previous database kept at", kept)
+	}
+	return nil
+}
+
+func healthcheck(ctx context.Context, cfg config.Config) error {
+	return ready(ctx, cfg)
+}
+
+// ready asks the server on cfg.Addr for /readyz.
+func ready(ctx context.Context, cfg config.Config) error {
+	host, port, err := net.SplitHostPort(cfg.Addr)
+	if err != nil {
+		return err
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(host, port)+"/readyz", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("readyz returned %s", resp.Status)
+	}
+	return nil
 }
 
 func course(ctx context.Context, cfg config.Config, args []string) error {
@@ -128,7 +291,7 @@ func course(ctx context.Context, cfg config.Config, args []string) error {
 	hours := fs.Int("hours", 0, "instructional hours")
 	fs.Parse(args)
 
-	st, err := openStore(ctx, cfg)
+	st, err := openStore(ctx, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -160,7 +323,7 @@ func importCSV(ctx context.Context, cfg config.Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	st, err := openStore(ctx, cfg)
+	st, err := openStore(ctx, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -172,7 +335,7 @@ func importCSV(ctx context.Context, cfg config.Config, args []string) error {
 
 	var w io.Writer = os.Stdout
 	if *out != "" {
-		of, err := os.Create(*out)
+		of, err := os.OpenFile(*out, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // contains claim links
 		if err != nil {
 			return err
 		}
@@ -202,7 +365,7 @@ func revoke(ctx context.Context, cfg config.Config, args []string) error {
 	if fs.NArg() != 1 {
 		return errors.New("usage: certsforever revoke [-reason text] CERT_ID")
 	}
-	st, err := openStore(ctx, cfg)
+	st, err := openStore(ctx, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -218,7 +381,7 @@ func claimLink(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) != 1 {
 		return errors.New("usage: certsforever claim-link CERT_ID")
 	}
-	st, err := openStore(ctx, cfg)
+	st, err := openStore(ctx, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -232,7 +395,7 @@ func claimLink(ctx context.Context, cfg config.Config, args []string) error {
 }
 
 func demo(ctx context.Context, cfg config.Config) error {
-	st, err := openStore(ctx, cfg)
+	st, err := openStore(ctx, cfg, nil)
 	if err != nil {
 		return err
 	}

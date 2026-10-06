@@ -189,6 +189,18 @@ func TestCertificateLifecycle(t *testing.T) {
 	}
 }
 
+func TestReadyz(t *testing.T) {
+	h := newHarness(t)
+	resp, body := h.do("GET", "/readyz", "", "", false)
+	if resp.StatusCode != 200 || !strings.Contains(body, `"status": "ok"`) || !strings.Contains(body, `"schema_version": 1`) {
+		t.Fatalf("readyz: %d %s", resp.StatusCode, body)
+	}
+	h.st.Close() // database gone -> not ready
+	if resp, _ := h.do("GET", "/readyz", "", "", false); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("readyz with closed db: %d", resp.StatusCode)
+	}
+}
+
 func TestVerifyRedirectsAndUnknownIDs(t *testing.T) {
 	h := newHarness(t)
 	resp, _ := h.do("GET", "/verify?id=zcw-7k3m9qf2xa", "", "", false)

@@ -16,7 +16,7 @@ const (
 // RecordEvent stores one event. Failures are the caller's to log; analytics
 // should never break a page view.
 func (s *Store) RecordEvent(ctx context.Context, certID string, kind EventKind, referrerHost string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.wdb.ExecContext(ctx,
 		`INSERT INTO events (certificate_id, kind, referrer_host) VALUES (?, ?, NULLIF(?, ''))`,
 		certID, string(kind), referrerHost)
 	return err
@@ -36,7 +36,7 @@ type CourseStats struct {
 
 // Stats returns per-course totals.
 func (s *Store) Stats(ctx context.Context) ([]CourseStats, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.rdb.QueryContext(ctx, `
 		WITH ev AS (
 			SELECT certificate_id,
 			       SUM(kind = 'view')           AS views,

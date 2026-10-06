@@ -4,6 +4,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"certsforever/internal/buildinfo"
 	"certsforever/internal/config"
 	"certsforever/internal/store"
 )
@@ -51,6 +53,7 @@ func (s *Server) routes() {
 	m := s.mux
 	m.Handle("GET /static/", http.FileServerFS(assets))
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	m.HandleFunc("GET /readyz", s.handleReady)
 
 	// Public: what employers and LinkedIn see.
 	m.HandleFunc("GET /{$}", s.handleVerify)
@@ -80,6 +83,25 @@ func (s *Server) Handler() http.Handler {
 	return s.logRequests(securityHeaders(s.mux))
 }
 
+// handleReady reports whether the server can serve traffic: both database
+// pools answer and the schema is migrated. Used by Docker HEALTHCHECK,
+// load balancers and uptime monitors.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	info := buildinfo.Get()
+	v, err := s.store.Health(ctx)
+	w.Header().Set("Cache-Control", "no-store")
+	if err != nil {
+		s.log.Error("readiness check failed", "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "unavailable", "version": info.Version})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok", "version": info.Version, "commit": info.Commit, "schema_version": v,
+	})
+}
+
 // --- middleware ---------------------------------------------------------
 
 func securityHeaders(next http.Handler) http.Handler {
@@ -107,6 +129,9 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rec, r)
 		path := r.URL.Path
+		if (path == "/readyz" || path == "/healthz") && rec.status == http.StatusOK {
+			return // health probes every few seconds would drown the log
+		}
 		if strings.HasPrefix(path, "/claim/") {
 			path = "/claim/…" // never log claim tokens
 		}
