@@ -37,7 +37,10 @@ services:
     tmpfs:
       - /tmp
     cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    # Set CERTS_NO_NEW_PRIVILEGES=false in .env only if the container fails
+    # with "exec /usr/local/bin/certsforever: operation not permitted": Docker
+    # installed as a Snap (Ubuntu) can't start programs with this protection on.
+    security_opt: ["no-new-privileges:${CERTS_NO_NEW_PRIVILEGES:-true}"]
     stop_grace_period: 15s
     logging:
       driver: json-file

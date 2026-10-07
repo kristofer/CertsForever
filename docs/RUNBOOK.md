@@ -60,6 +60,18 @@ Without the `tls` profile, the app listens on `127.0.0.1:8080` only. Use that
 when another reverse proxy (nginx, a load balancer, Cloudflare Tunnel)
 terminates TLS.
 
+**If the container won't start, with `exec /usr/local/bin/certsforever:
+operation not permitted`:** Docker is probably the Snap package. Check with
+`snap list docker`. Snap's AppArmor confinement blocks starting programs
+under the `no-new-privileges` protection. Fix it one of two ways:
+
+- **Best:** remove the Snap (`sudo snap remove docker`) and install Docker
+  from docker.com's apt repository. Images and volumes don't carry over, so
+  do this before there's real data, or back up first (§4).
+- **Quick:** add `CERTS_NO_NEW_PRIVILEGES=false` to `.env` and run
+  `docker compose up -d`. The other protections stay on: no capabilities,
+  read-only filesystem, non-root user.
+
 To use a published image instead of building on the server, replace
 `build:` with `image: ghcr.io/<owner>/<repo>:<version>` in `compose.yaml` (or
 in a `compose.override.yaml`).
