@@ -1,0 +1,143 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Org}}: certificates your graduates post, and employers can check</title>
+<meta name="description" content="{{.Org}} issues completion certificates for schools and training programs. Graduates add them to LinkedIn in one click, anyone can confirm they're real, and every certificate points back to the program.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{.Org}}">
+<meta property="og:title" content="{{.Org}}: certificates your graduates post, and employers can check">
+<meta property="og:description" content="Completion certificates for schools and training programs, made for LinkedIn and verifiable by anyone.">
+<meta property="og:url" content="{{.BaseURL}}/">
+<meta property="og:image" content="{{.BaseURL}}/static/logo-og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="628">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f8f7f3">
+<link rel="canonical" href="{{.BaseURL}}/">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/landing.css">
+</head>
+<body class="lp">
+
+<header class="lp-top">
+  <a class="lp-brand" href="/">
+    <img src="/static/emblem-sm.png" width="52" height="40" alt="">
+    <span class="lp-wordmark">{{.Org}}<small>Digital certificates</small></span>
+  </a>
+  <nav class="lp-nav" aria-label="Site">
+    <a href="#verify">Verify a certificate</a>
+    <a href="/login">Sign in</a>
+  </nav>
+</header>
+
+<main>
+<section class="lp-hero">
+  <img class="lp-emblem" src="/static/emblem.png" width="619" height="480"
+    alt="{{.Org}} emblem: a wooden signpost inside a laurel wreath">
+  <div class="lp-hero-copy">
+    <h1>Certificates your graduates post, and employers can&nbsp;check.</h1>
+    <p class="lp-lede">{{.Org}} issues completion certificates for schools and training programs. Graduates add them to LinkedIn in one click, anyone can confirm they're real, and every certificate points the way back to your program.</p>
+    <div class="lp-actions">
+      {{with .ContactEmail}}<a class="lp-btn" href="mailto:{{.}}?subject=Certificates%20for%20our%20program">Email us about your program</a>{{end}}
+      <a class="lp-btn lp-btn-quiet" href="#how">See how it works</a>
+    </div>
+  </div>
+</section>
+
+<section class="lp-show" aria-labelledby="show-title">
+  <div class="lp-show-copy">
+    <h2 id="show-title">What your graduates post</h2>
+    <p>When a graduate shares their certificate, the post carries a full-size image made for it: their name, the course and your school, with a link anyone can check.</p>
+    <ul class="lp-points">
+      <li>The link opens the certificate's own page, with the credential ID and the date it was issued.</li>
+      <li>"Add to profile" puts it under Licenses &amp; Certifications on LinkedIn, filled in for them.</li>
+      <li>Every page has a link to your program, so the people looking at your graduates can find you.</li>
+    </ul>
+  </div>
+
+  <figure class="lp-post" aria-label="Example: a graduate's post with their certificate">
+    <div class="lp-post-head">
+      <span class="lp-avatar" aria-hidden="true">AL</span>
+      <div><strong>Ada Lovelace</strong><span>Software developer</span></div>
+    </div>
+    <p class="lp-post-text">Twelve weeks, one capstone project and a lot of coffee. I've completed the Full-Stack Java program at Riverside Code School.</p>
+    <div class="lp-post-link">
+      <img src="/static/landing-share.png" width="1200" height="627" loading="lazy"
+        alt="Certificate of Completion for Ada Lovelace, Full-Stack Java Developer, from Riverside Code School">
+      <div class="lp-post-link-text">
+        <strong>Ada Lovelace completed Full-Stack Java Developer</strong>
+        <span>laurelposts.com</span>
+      </div>
+    </div>
+  </figure>
+</section>
+
+<section class="lp-how" id="how" aria-labelledby="how-title">
+  <h2 id="how-title">How it works</h2>
+  <ol class="lp-steps">
+    <li>
+      <h3>You upload who finished</h3>
+      <p>A spreadsheet of names, emails and course. Every row is checked and shown to you before anything is issued, and uploading the same file twice is safe.</p>
+    </li>
+    <li>
+      <h3>Each graduate gets a private link</h3>
+      <p>By email, with one reminder if they haven't looked. A certificate stays private until its owner chooses to make it public.</p>
+    </li>
+    <li>
+      <h3>They add it to LinkedIn</h3>
+      <p>One click fills in Licenses &amp; Certifications with the credential ID and link, or shares a post with the certificate as its preview.</p>
+    </li>
+    <li>
+      <h3>Anyone can check it</h3>
+      <p>Each certificate has a permanent page that says who earned what, and when. If you ever revoke one, its page says that too.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="lp-features" aria-labelledby="features-title">
+  <div class="lp-features-inner">
+    <h2 id="features-title">For your program</h2>
+    <dl class="lp-list">
+      <div><dt>Your look</dt>
+        <dd>Your logo, colors, wording and up to two signatures. Certificates keep the design they were issued with, even if you change it later.</dd></div>
+      <div><dt>Your domain, if you want it</dt>
+        <dd>Certificates can live at an address like certs.yourschool.org. Links already shared keep working if you ever change it.</dd></div>
+      <div><dt>Visitors for your program</dt>
+        <dd>Every certificate page links to your site, tagged so the visits show up in your analytics. See views, LinkedIn additions and site visits for each course.</dd></div>
+      <div><dt>Mistakes you can fix</dt>
+        <dd>Correct a misspelled name without breaking the link on anyone's profile. Send a new link to someone who lost theirs.</dd></div>
+      <div><dt>Your whole team, on the record</dt>
+        <dd>Invite colleagues to help. Every change is written to a log you can read, so you always know who did what.</dd></div>
+      <div><dt>Works with your systems</dt>
+        <dd>Export every certificate as a spreadsheet, or let your learning platform issue certificates itself through a private access key.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="lp-verify" id="verify" aria-labelledby="verify-title">
+  <h2 id="verify-title">Checking someone's certificate?</h2>
+  <p>Enter the credential ID from the certificate or the LinkedIn entry.</p>
+  <form method="get" action="/verify">
+    <label for="lp-id" class="lp-sr">Credential ID</label>
+    <input id="lp-id" name="id" placeholder="ABC-7K3M9QF2XA" autocomplete="off" spellcheck="false" required>
+    <button class="lp-btn" type="submit">Verify</button>
+  </form>
+</section>
+</main>
+
+<footer class="lp-foot">
+  <a class="lp-brand lp-brand-foot" href="/">
+    <img src="/static/emblem-sm.png" width="39" height="30" alt="">
+    <span class="lp-wordmark">{{.Org}}</span>
+  </a>
+  <nav aria-label="Footer">
+    <a href="/verify">Verify a certificate</a>
+    <a href="/login">Sign in</a>
+    {{with .ContactEmail}}<a href="mailto:{{.}}">{{.}}</a>{{end}}
+  </nav>
+</footer>
+</body>
+</html>{{end}}

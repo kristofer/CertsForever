@@ -48,6 +48,13 @@ code { font-family: var(--mono); font-size: 0.92em; }
   display: flex; align-items: baseline; gap: 10px;
 }
 .brand { font-weight: 700; color: var(--ink); text-decoration: none; letter-spacing: 0.01em; }
+.brand-emblem { vertical-align: -9px; margin-right: 8px; }
+/* Platform pages (sign-in, consoles, verify) wear the Laurel Posts colors;
+   certificate pages keep the school's. */
+body.platform { --accent: #1d4a3b; --accent-ink: #ffffff; --ok-bg: #e6efe8; --ok-ink: #1d4a3b; }
+@media (prefers-color-scheme: dark) {
+  body.platform { --accent: #8cc4a2; --accent-ink: #0c1a14; --ok-bg: #16302a; --ok-ink: #a9dcbd; }
+}
 .brand-sub { color: var(--muted); font-size: 14px; }
 
 .foot {
@@ -141,6 +148,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
   border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
   font: 16px var(--mono); text-transform: uppercase;
 }
+.verify input[type=email] { text-transform: none; font-family: var(--sans); }
 .error { color: var(--bad-ink); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 

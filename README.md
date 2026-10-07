@@ -101,6 +101,30 @@ certsforever client suspend -slug zcw -reason "…"           # can't issue; cer
 The prefix is part of every certificate URL, so it can't change once the
 client has issued a certificate.
 
+## The landing page
+
+The platform domain's home page (`/`) introduces the service to schools: what
+graduates' posts look like, how issuing works, the features, and a box for
+employers to verify a credential ID. It uses `CERTS_PLATFORM_NAME`, and
+`CERTS_CONTACT_EMAIL` if set. On a client's own domain, `/` is that client's
+verify page instead. The page is `internal/web/templates/landing.html` with
+its own stylesheet, `static/landing.css`. Its example share image
+(`static/landing-share.png`) was made with the app's share-image renderer.
+
+The Laurel Posts logo is in `docs/brand/laurel-posts-logo.jpg`. The web
+assets cut from it are `static/emblem.png` and `static/emblem-sm.png` (the
+signpost and wreath, on a transparent background), `favicon.png`,
+`apple-touch-icon.png` and `logo-og.jpg` (the link preview for the home
+page). `docs/brand/make-assets.py` remakes them from the logo:
+
+```sh
+python3 docs/brand/make-assets.py docs/brand/laurel-posts-logo.jpg internal/web/static
+```
+
+Afterwards it quantizes the PNGs to 256 colors to keep them small (see the
+script's notes). The sign-in page, consoles and verify page show the emblem
+and use the logo's green. A school's certificate pages show only the school.
+
 ## Custom domains
 
 A client can have its certificates on its own domain, e.g.
@@ -217,7 +241,8 @@ certsforever version
 | `CERTS_DB` | `certs.db` | SQLite file |
 | `CERTS_BASE_URL` | `http://localhost:8080` | public origin. **Set this in production**; it goes into every link and share image |
 | `CERTS_ADMIN_TOKEN` | *(empty: admin API off)* | bearer token for `/admin/api/*`, 32+ chars; or `CERTS_ADMIN_TOKEN_FILE` |
-| `CERTS_PLATFORM_NAME` | `CertsForever` | shown on pages that belong to no single client (verify, errors) |
+| `CERTS_PLATFORM_NAME` | `CertsForever` | shown on pages that belong to no single client (the landing page, verify, errors) |
+| `CERTS_CONTACT_EMAIL` | (none) | the landing page's "Email us about your program" address; empty hides the button |
 | `CERTS_CLIENT` | *(empty)* | default `-client` for CLI commands |
 | `CERTS_MASTER_KEY` | *(dev key)* | 32 bytes, hex or base64; encrypts two-step secrets. **Required in production**; or `CERTS_MASTER_KEY_FILE` |
 | `CERTS_SMTP_URL` | *(empty)* | `smtp://user:pass@host:587` (STARTTLS) or `smtps://…:465`; or `CERTS_SMTP_URL_FILE` |

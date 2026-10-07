@@ -21,6 +21,7 @@ type Config struct {
 	BaseURL      string // CERTS_BASE_URL         public origin, e.g. https://certs.zipcodewilmington.org
 	AdminToken   string // CERTS_ADMIN_TOKEN[_FILE] bearer token for /admin/api; empty disables it
 	PlatformName string // CERTS_PLATFORM_NAME    shown on pages that belong to no single client
+	ContactEmail string // CERTS_CONTACT_EMAIL    the landing page's "email us" address (optional)
 
 	// MasterKey encrypts secrets at rest (TOTP). CERTS_MASTER_KEY[_FILE]:
 	// 32 bytes as hex or base64. Required in production. Losing it means
@@ -75,6 +76,7 @@ func FromEnv() Config {
 		BaseURL:      strings.TrimRight(env("CERTS_BASE_URL", "http://localhost:8080"), "/"),
 		AdminToken:   strings.TrimSpace(os.Getenv("CERTS_ADMIN_TOKEN")),
 		PlatformName: env("CERTS_PLATFORM_NAME", "CertsForever"),
+		ContactEmail: strings.TrimSpace(os.Getenv("CERTS_CONTACT_EMAIL")),
 		SMTPURL:      strings.TrimSpace(os.Getenv("CERTS_SMTP_URL")),
 		MailFrom:     strings.TrimSpace(os.Getenv("CERTS_MAIL_FROM")),
 		TrustProxy:   strings.EqualFold(os.Getenv("CERTS_TRUST_PROXY"), "true") || os.Getenv("CERTS_TRUST_PROXY") == "1",
@@ -84,6 +86,9 @@ func FromEnv() Config {
 // Load reads the environment, resolves *_FILE secrets (Docker/systemd
 // secrets) and validates the result. All problems are reported together.
 func Load() (Config, error) {
+	if err := commentValues(os.Environ()); err != nil {
+		return Config{}, err
+	}
 	c := FromEnv()
 	var errs []error
 	tok, err := secret("CERTS_ADMIN_TOKEN")
@@ -107,6 +112,27 @@ func Load() (Config, error) {
 	}
 	errs = append(errs, c.Validate())
 	return c, errors.Join(errs...)
+}
+
+// commentValues catches a common .env mistake: an empty setting followed by
+// a comment ("CERTS_SMTP_URL=   # later"). Docker Compose strips a comment
+// after a value, but with no value it keeps the comment as the value.
+func commentValues(environ []string) error {
+	var errs []error
+	for _, kv := range environ {
+		k, v, ok := strings.Cut(kv, "=")
+		if ok && strings.HasPrefix(k, "CERTS_") && strings.HasPrefix(strings.TrimSpace(v), "#") {
+			errs = append(errs, fmt.Errorf("%s is set to a comment (%q): in .env, leave nothing after the = and put comments on their own line", k, truncate(v, 40)))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // Validate checks the configuration and returns every problem found.
@@ -143,6 +169,9 @@ func (c Config) Validate() error {
 	}
 	if c.AdminToken != "" && len(c.AdminToken) < 32 {
 		bad("CERTS_ADMIN_TOKEN must be at least 32 characters (try: openssl rand -hex 32)")
+	}
+	if e := c.ContactEmail; e != "" && (!strings.Contains(e, "@") || strings.ContainsAny(e, " <>\"?")) {
+		bad("CERTS_CONTACT_EMAIL %q must be a plain address like hello@example.org", e)
 	}
 	if strings.TrimSpace(c.PlatformName) == "" {
 		bad("CERTS_PLATFORM_NAME is empty")

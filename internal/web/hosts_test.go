@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"certsforever/internal/config"
 	"certsforever/internal/store"
 )
 
@@ -237,5 +238,54 @@ func TestTLSAsk(t *testing.T) {
 	// On a client's domain it isn't served at all.
 	if resp, _ := h.onHost("certs.zcw.example", "GET", "/internal/tls-ask?domain=certs.zcw.example", nil); resp.StatusCode != 302 {
 		t.Fatalf("ask on client domain: %d", resp.StatusCode)
+	}
+}
+
+func TestLandingPage(t *testing.T) {
+	h := newHarnessWith(t, &harnessOpts{cfg: func(c *config.Config) {
+		c.PlatformName = "Laurel Posts"
+		c.ContactEmail = "hello@laurelposts.example"
+	}})
+	f := domainSetup(t, h)
+
+	resp, page := h.onHost(f.platform, "GET", "/", nil)
+	if resp.StatusCode != 200 || !strings.Contains(page, "Certificates your graduates post") ||
+		!strings.Contains(page, `href="mailto:hello@laurelposts.example`) || !strings.Contains(page, `action="/verify"`) {
+		t.Fatalf("landing page: %d", resp.StatusCode)
+	}
+	// Its stylesheet and image are served, and nothing inline breaks the CSP.
+	for _, p := range []string{"/static/landing.css", "/static/landing-share.png"} {
+		if resp, _ := h.onHost(f.platform, "GET", p, nil); resp.StatusCode != 200 {
+			t.Errorf("%s: %d", p, resp.StatusCode)
+		}
+	}
+	if strings.Contains(page, "style=") || strings.Contains(page, "<script") {
+		t.Fatal("landing page has inline style or script")
+	}
+	for _, p := range []string{"/static/emblem.png", "/static/emblem-sm.png", "/static/favicon.png", "/static/logo-og.jpg", "/static/apple-touch-icon.png"} {
+		if resp, _ := h.onHost(f.platform, "GET", p, nil); resp.StatusCode != 200 {
+			t.Errorf("%s: %d", p, resp.StatusCode)
+		}
+	}
+	// Platform pages carry the platform's emblem; a school's certificate page doesn't.
+	if _, page := h.onHost(f.platform, "GET", "/login", nil); !strings.Contains(page, "emblem-sm.png") || !strings.Contains(page, `class="platform"`) {
+		t.Error("sign-in page lacks the platform emblem")
+	}
+	if _, page := h.onHost(f.platform, "GET", "/c/"+f.twaCert, nil); strings.Contains(page, "emblem") || strings.Contains(page, "favicon.png") {
+		t.Error("certificate page shows the platform emblem")
+	}
+	// A school's domain keeps its own verify page as home.
+	if _, page := h.onHost("certs.zcw.example", "GET", "/", nil); strings.Contains(page, "Certificates your graduates post") ||
+		!strings.Contains(page, "Zip Code Wilmington") {
+		t.Fatal("client domain shows the platform landing page")
+	}
+	// Old /?id= links still verify.
+	if resp, _ := h.onHost(f.platform, "GET", "/?id="+f.twaCert, nil); resp.Header.Get("Location") != "/c/"+f.twaCert {
+		t.Fatalf("/?id=: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	// Without a contact address there's no email button.
+	h2 := newHarness(t)
+	if _, page := h2.do("GET", "/", "", "", false); strings.Contains(page, "mailto:") {
+		t.Fatal("email button without a contact address")
 	}
 }

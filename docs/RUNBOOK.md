@@ -385,7 +385,8 @@ scripts/docker-smoke.sh certsforever:local
 | `CERTS_ADDR` | `:8080` | |
 | `CERTS_DB` | `certs.db` (image: `/data/certs.db`) | Its directory must exist |
 | `CERTS_ADMIN_TOKEN` / `_FILE` | empty (admin API off) | 32+ characters |
-| `CERTS_PLATFORM_NAME` | `CertsForever` | Name on pages that belong to no single client |
+| `CERTS_PLATFORM_NAME` | `CertsForever` | Name on pages that belong to no single client, including the landing page |
+| `CERTS_CONTACT_EMAIL` | (none) | Address behind the landing page's "Email us" button; empty hides it |
 | `CERTS_CLIENT` | empty | Default `-client` for CLI commands |
 | `CERTS_DOMAIN` | — | Compose `tls` profile only |
 | `CERTS_MASTER_KEY` / `_FILE` | dev key (production: required) | 32 bytes hex/base64; encrypts two-step secrets. Back it up |

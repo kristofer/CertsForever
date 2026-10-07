@@ -6,12 +6,13 @@
 <title>{{block "title" .}}{{.Org}} Certificates{{end}}</title>
 {{if .NoIndex}}<meta name="robots" content="noindex">{{end}}
 {{block "meta" .}}{{end}}
-<link rel="icon" href="data:,">
+{{if .Platform}}<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">{{else}}<link rel="icon" href="data:,">{{end}}
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body{{if .Platform}} class="platform"{{end}}>
 <header class="top">
-  <a class="brand" href="{{if .User}}/admin{{else}}/{{end}}">{{.Org}}</a>
+  <a class="brand" href="{{if .User}}/admin{{else}}/{{end}}">{{if .Platform}}<img class="brand-emblem" src="/static/emblem-sm.png" width="42" height="32" alt="">{{end}}{{.Org}}</a>
   <span class="brand-sub">Certificates</span>
   {{with .User}}
   <nav class="usernav" aria-label="Account">

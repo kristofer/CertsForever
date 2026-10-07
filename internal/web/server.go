@@ -99,6 +99,12 @@ func New(cfg config.Config, st *store.Store, log *slog.Logger, deps Deps) (*Serv
 		}
 		s.pages[p] = t
 	}
+	// The landing page is a standalone document with its own stylesheet.
+	lp, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/landing.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse landing.html: %w", err)
+	}
+	s.pages["landing.html"] = lp
 	s.routes()
 	return s, nil
 }
@@ -111,7 +117,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /internal/tls-ask", s.handleTLSAsk)
 
 	// Public: what employers and LinkedIn see.
-	m.HandleFunc("GET /{$}", s.handleVerify)
+	m.HandleFunc("GET /{$}", s.handleHome)
 	m.HandleFunc("GET /verify", s.handleVerify)
 	m.HandleFunc("GET /c/{id}", s.handleCert)
 	m.HandleFunc("GET /c/{id}/og.png", s.handleOGImage)
@@ -332,11 +338,14 @@ type base struct {
 	NoIndex  bool
 	User     *store.User // set on console pages: shows the signed-in nav
 	CSRF     string
+	// Platform: the page belongs to the platform, not a client, so it shows
+	// the platform's emblem and favicon. Certificate pages show the school.
+	Platform bool
 }
 
 // platformBase is for pages that belong to no single client (verify, errors).
 func (s *Server) platformBase() base {
-	return base{Org: s.cfg.PlatformName, SiteURL: "/"}
+	return base{Org: s.cfg.PlatformName, SiteURL: "/", Platform: true}
 }
 
 // issuerBase brands a page with the client that issued the certificate.

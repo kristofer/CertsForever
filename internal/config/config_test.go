@@ -116,3 +116,22 @@ func TestMasterKey(t *testing.T) {
 		t.Fatalf("production without key: %v", err)
 	}
 }
+
+func TestCommentAsValue(t *testing.T) {
+	err := commentValues([]string{
+		"CERTS_ADMIN_TOKEN=# leave empty: no scripts yet",
+		"CERTS_SMTP_URL=   # later",
+		"CERTS_PLATFORM_NAME=Laurel Posts",
+		"CERTS_MAIL_FROM=Laurel Posts <certs@laurelposts.com>",
+		"OTHER=# not ours",
+	})
+	if err == nil || !strings.Contains(err.Error(), "CERTS_ADMIN_TOKEN is set to a comment") ||
+		!strings.Contains(err.Error(), "CERTS_SMTP_URL is set to a comment") ||
+		strings.Contains(err.Error(), "PLATFORM_NAME") || strings.Contains(err.Error(), "OTHER") {
+		t.Fatalf("comment values: %v", err)
+	}
+	t.Setenv("CERTS_SMTP_URL", "# later")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "put comments on their own line") {
+		t.Fatalf("Load: %v", err)
+	}
+}

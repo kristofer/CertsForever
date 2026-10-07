@@ -1,0 +1,144 @@
+/* Landing page for the platform domain, in the colors of the Laurel Posts
+   logo. Separate from style.css so certificate and console pages are
+   untouched. */
+:root {
+  --lp-paper: #f8f7f3;   /* the logo's own background */
+  --lp-panel: #efeadf;   /* a step toward the signpost's wood */
+  --lp-ink: #0b2328;     /* the wordmark */
+  --lp-muted: #4a5a5c;
+  --lp-rule: #ddd6c6;
+  --lp-laurel: #1d4a3b;  /* the leaves */
+  --lp-laurel-ink: #ffffff;
+  --lp-gold: #b8892f;    /* the gold leaves */
+  --lp-wood: #8f4f27;    /* the signpost */
+  --lp-card: #ffffff;
+  --lp-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --lp-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lp-paper: #101a17;
+    --lp-panel: #182320;
+    --lp-ink: #eef2ee;
+    --lp-muted: #a9b6ae;
+    --lp-rule: #2c3a35;
+    --lp-laurel: #8cc4a2;
+    --lp-laurel-ink: #0c1a14;
+    --lp-gold: #d9b45e;
+    --lp-wood: #d99a62;
+    --lp-card: #16211e;
+  }
+}
+
+* { box-sizing: border-box; }
+.lp { margin: 0; background: var(--lp-paper); color: var(--lp-ink); font: 17px/1.6 var(--lp-sans); }
+.lp a { color: var(--lp-laurel); }
+.lp :focus-visible { outline: 3px solid var(--lp-gold); outline-offset: 3px; }
+.lp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.lp img { max-width: 100%; height: auto; }
+
+/* ---- header: the wordmark, echoing the logo's spaced capitals ---- */
+.lp-top, .lp-hero, .lp-show, .lp-how, .lp-verify, .lp-features-inner, .lp-foot {
+  max-width: 1120px; margin-left: auto; margin-right: auto; padding-left: 24px; padding-right: 24px; }
+.lp-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 18px; padding-bottom: 18px; }
+.lp .lp-brand { display: inline-flex; align-items: center; gap: 12px; color: var(--lp-ink); text-decoration: none; }
+.lp-wordmark { display: flex; flex-direction: column; font: 600 19px/1.1 var(--lp-serif);
+  text-transform: uppercase; letter-spacing: 0.08em; }
+.lp-wordmark small { font: 500 11px/1.4 var(--lp-sans); letter-spacing: 0.14em; color: var(--lp-muted); margin-top: 3px; }
+.lp-nav { display: flex; gap: 22px; font-size: 15px; }
+.lp .lp-nav a { color: var(--lp-ink); text-decoration: none; }
+.lp .lp-nav a:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+/* ---- hero: the signpost points at the headline ---- */
+.lp-hero { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 56px; align-items: center;
+  padding-top: 40px; padding-bottom: 88px; }
+.lp-emblem { display: block; width: 100%; max-width: 440px; justify-self: end; }
+.lp-hero h1 { font: 600 clamp(38px, 5vw, 60px)/1.05 var(--lp-serif); letter-spacing: -0.01em; margin: 0 0 22px;
+  max-width: 17ch; text-wrap: balance; }
+.lp-lede { font-size: 19px; color: var(--lp-muted); max-width: 31em; margin: 0 0 30px; }
+.lp-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.lp-btn { display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border-radius: 6px;
+  background: var(--lp-laurel); color: var(--lp-laurel-ink); border: 1.5px solid var(--lp-laurel);
+  font: 600 16px var(--lp-sans); text-decoration: none; cursor: pointer; }
+.lp a.lp-btn { color: var(--lp-laurel-ink); }
+.lp a.lp-btn-quiet { background: transparent; color: var(--lp-laurel); }
+
+/* ---- what graduates post ---- */
+.lp-show { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr); gap: 64px; align-items: center;
+  padding-top: 72px; padding-bottom: 80px; border-top: 1px solid var(--lp-rule); }
+.lp h2 { font: 600 clamp(28px, 3.3vw, 38px)/1.15 var(--lp-serif); margin: 0 0 18px; }
+.lp-show-copy > p { color: var(--lp-muted); margin: 0 0 22px; max-width: 32em; }
+.lp-points { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+.lp-points li { position: relative; padding-left: 26px; max-width: 32em; }
+.lp-points li::before { content: ""; position: absolute; left: 2px; top: 0.55em; width: 12px; height: 7px;
+  border-radius: 50% 0; background: var(--lp-gold); transform: rotate(-30deg); }
+
+.lp-post { margin: 0; background: var(--lp-card); border: 1px solid var(--lp-rule); border-radius: 10px;
+  padding: 18px 18px 0; overflow: hidden; box-shadow: 0 22px 44px -28px rgba(11, 35, 40, 0.45); }
+.lp-post-head { display: flex; align-items: center; gap: 12px; }
+.lp-post-head div strong { display: block; font-size: 15px; }
+.lp-post-head div span { display: block; font-size: 13px; color: var(--lp-muted); }
+.lp-avatar { flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--lp-panel); color: var(--lp-wood); font: 600 15px var(--lp-sans); }
+.lp-post-text { font-size: 15px; margin: 14px 0; }
+.lp-post-link { margin: 0 -18px; border-top: 1px solid var(--lp-rule); }
+.lp-post-link img { display: block; width: 100%; }
+.lp-post-link-text { padding: 10px 18px 14px; background: var(--lp-panel); }
+.lp-post-link-text strong { display: block; font-size: 14px; }
+.lp-post-link-text span { font-size: 13px; color: var(--lp-muted); }
+
+/* ---- how it works: a real sequence, so it's numbered (in signpost wood) ---- */
+.lp-how { padding-top: 72px; padding-bottom: 80px; border-top: 1px solid var(--lp-rule); }
+.lp-how h2 { margin-bottom: 36px; }
+.lp-steps { list-style: none; counter-reset: step; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; }
+.lp-steps li { counter-increment: step; position: relative; padding-top: 60px; }
+.lp-steps li::before { content: counter(step); position: absolute; top: 0; left: 0;
+  font: 600 44px/1 var(--lp-serif); color: var(--lp-wood); }
+.lp-steps h3 { font: 600 18px/1.3 var(--lp-sans); margin: 0 0 8px; }
+.lp-steps p { margin: 0; color: var(--lp-muted); font-size: 16px; }
+
+/* ---- features ---- */
+.lp-features { background: var(--lp-panel); padding-top: 72px; padding-bottom: 76px; }
+.lp-features h2 { margin-bottom: 32px; }
+.lp-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 64px; margin: 0; }
+.lp-list div { border-top: 2px solid var(--lp-gold); padding-top: 14px; }
+.lp-list dt { font: 600 21px/1.3 var(--lp-serif); margin-bottom: 6px; }
+.lp-list dd { margin: 0; color: var(--lp-muted); max-width: 36em; }
+
+/* ---- verify ---- */
+.lp-verify { padding-top: 76px; padding-bottom: 84px; }
+.lp-verify h2 { margin-bottom: 8px; }
+.lp-verify p { color: var(--lp-muted); margin: 0 0 20px; }
+.lp-verify form { display: flex; flex-wrap: wrap; gap: 10px; max-width: 560px; }
+.lp-verify input { flex: 1 1 260px; min-height: 48px; padding: 0 16px; border-radius: 6px;
+  border: 1.5px solid var(--lp-rule); background: var(--lp-card); color: var(--lp-ink);
+  font: 16px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-transform: uppercase; }
+.lp-verify input::placeholder { color: var(--lp-muted); opacity: 0.7; }
+
+/* ---- footer ---- */
+.lp-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px;
+  padding-top: 26px; padding-bottom: 40px; border-top: 1px solid var(--lp-rule); color: var(--lp-muted); font-size: 15px; }
+.lp-brand-foot .lp-wordmark { font-size: 15px; }
+.lp-foot nav { display: flex; flex-wrap: wrap; gap: 20px; }
+.lp .lp-foot nav a { color: var(--lp-muted); }
+
+/* ---- narrow screens ---- */
+@media (max-width: 900px) {
+  .lp-hero { grid-template-columns: 1fr; gap: 28px; padding-top: 16px; padding-bottom: 64px; }
+  .lp-emblem { justify-self: start; max-width: 300px; }
+  .lp-hero h1 { max-width: 16ch; }
+  .lp-show { grid-template-columns: 1fr; gap: 40px; }
+  .lp-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .lp { font-size: 16px; }
+  .lp-top, .lp-hero, .lp-show, .lp-how, .lp-verify, .lp-features-inner, .lp-foot { padding-left: 16px; padding-right: 16px; }
+  .lp-nav a[href="#verify"] { display: none; }
+  .lp-wordmark small { display: none; }
+  .lp-emblem { max-width: 220px; }
+  .lp-lede { font-size: 17px; }
+  .lp-steps, .lp-list { grid-template-columns: 1fr; }
+  .lp-steps li { padding-top: 0; padding-left: 46px; }
+  .lp-steps li::before { font-size: 32px; }
+}

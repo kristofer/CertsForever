@@ -259,6 +259,24 @@ type verifyPage struct {
 	Error string
 }
 
+type landingPage struct {
+	Org          string
+	BaseURL      string
+	ContactEmail string
+}
+
+// handleHome is the landing page on the platform domain. On a client's own
+// domain the home page is that client's verify page, and links from before
+// the landing page (/?id=…) still verify.
+func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	if siteFrom(r) != nil || r.URL.Query().Has("id") {
+		s.handleVerify(w, r)
+		return
+	}
+	s.render(w, http.StatusOK, "landing.html", landingPage{Org: s.cfg.PlatformName, BaseURL: s.cfg.BaseURL,
+		ContactEmail: s.cfg.ContactEmail})
+}
+
 func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("id"))
 	p := verifyPage{base: s.siteBase(r), Query: q}
