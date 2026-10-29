@@ -23,7 +23,7 @@ the [runbook](docs/RUNBOOK.md).
 
 ## Quick start
 
-Requires Go 1.25+ and a C compiler (the SQLite driver uses cgo; on macOS the
+Requires Go 1.27+ and a C compiler (the SQLite driver uses cgo; on macOS the
 Xcode command-line tools are enough).
 
 ```sh
