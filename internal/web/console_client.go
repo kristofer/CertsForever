@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -301,7 +302,25 @@ func (s *Server) handleCertResend(w http.ResponseWriter, r *http.Request, a *aut
 		s.renderCertDetail(w, r, a, sc, "Email isn't configured on this server.", "", http.StatusConflict)
 		return
 	}
-	_, err := s.store.NewClaimLinkAndNotify(r.Context(), sc, id, func(c *store.Certificate, tok string) (*store.NewEmail, error) {
+	err := s.resendClaimLink(r.Context(), sc, id)
+	if msg, ok := userError(err); ok {
+		s.renderCertDetail(w, r, a, sc, msg, "", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		s.storeOrServerError(w, err)
+		return
+	}
+	s.audit(r, a, sc, "certificate.claim_link", "certificate", id, map[string]any{"emailed": true})
+	redirectNotice(w, r, clientPath(sc, "/certificates/"+id), "resent")
+}
+
+// resendClaimLink replaces certificate id's claim link and queues an email
+// with the new one; the old link stops working. Email must be configured.
+// Returns store.ErrNotFound for an unknown ID, or store.ErrConflict when the
+// certificate is revoked or its address is suppressed.
+func (s *Server) resendClaimLink(ctx context.Context, sc store.Scope, id string) error {
+	_, err := s.store.NewClaimLinkAndNotify(ctx, sc, id, func(c *store.Certificate, tok string) (*store.NewEmail, error) {
 		if c.Revoked() {
 			return nil, fmt.Errorf("%w: revoked certificates can't be sent", store.ErrConflict)
 		}
@@ -311,17 +330,10 @@ func (s *Server) handleCertResend(w http.ResponseWriter, r *http.Request, a *aut
 		return CertificateReadyEmail(s.queue, s.platform(), sc.Client(), c.Email, c.RecipientName, c.CourseTitle,
 			c.ID, ClaimURL(c.PublicBase(s.cfg.BaseURL), tok))
 	})
-	if msg, ok := userError(err); ok {
-		s.renderCertDetail(w, r, a, sc, msg, "", http.StatusConflict)
-		return
+	if err == nil {
+		s.queue.Wake()
 	}
-	if err != nil {
-		s.storeOrServerError(w, err)
-		return
-	}
-	s.queue.Wake()
-	s.audit(r, a, sc, "certificate.claim_link", "certificate", id, map[string]any{"emailed": true})
-	redirectNotice(w, r, clientPath(sc, "/certificates/"+id), "resent")
+	return err
 }
 
 func (s *Server) storeOrServerError(w http.ResponseWriter, err error) {
@@ -539,39 +551,10 @@ func (s *Server) handleRemind(w http.ResponseWriter, r *http.Request, a *auth, s
 		s.renderRoster(w, r, a, sc, "Email isn't configured on this server.", http.StatusConflict)
 		return
 	}
-	certs, _, err := s.store.SearchCertificates(r.Context(), sc, store.CertFilter{Course: q.Get("course"),
-		Cohort: q.Get("cohort"), Status: "active", Claimed: "no"})
+	sent, skipped, err := s.remindCohort(r.Context(), sc, q.Get("course"), q.Get("cohort"))
 	if err != nil {
 		s.serverError(w, err)
 		return
-	}
-	cl := sc.Client()
-	sent, skipped := 0, 0
-	for _, c := range certs {
-		if c.EmailBlocked {
-			skipped++
-			continue
-		}
-		err := s.store.RemindNow(r.Context(), sc, c.ID, func(c *store.Certificate, token string) (*store.NewEmail, error) {
-			m, err := emails.Reminder(s.platform(), emails.Client{Name: cl.Name, ReplyTo: cl.ReplyTo, SiteURL: cl.SiteURL},
-				c.Email, c.RecipientName, c.CourseTitle, ClaimURL(c.PublicBase(s.cfg.BaseURL), token))
-			if err != nil {
-				return nil, err
-			}
-			return s.queue.Prepare("reminder", m, "certificate", c.ID)
-		})
-		switch {
-		case err == nil:
-			sent++
-		case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrNotFound):
-			skipped++
-		default:
-			s.serverError(w, err)
-			return
-		}
-	}
-	if sent > 0 {
-		s.queue.Wake()
 	}
 	s.audit(r, a, sc, "cohort.remind", "cohort", q.Get("course")+"/"+q.Get("cohort"), map[string]any{"sent": sent, "skipped": skipped})
 	v := url.Values{"course": {q.Get("course")}, "cohort": {q.Get("cohort")}, "notice": {"reminded"}}
@@ -1002,4 +985,43 @@ func (s *Server) handleTokenRevoke(w http.ResponseWriter, r *http.Request, a *au
 	}
 	s.audit(r, a, sc, "api_token.revoke", "api_token", meta.Prefix, map[string]any{"name": meta.Name})
 	redirectNotice(w, r, clientPath(sc, "/tokens"), "token-revoked")
+}
+
+// remindCohort emails a "please publish" reminder to everyone in a cohort who
+// hasn't opened their link, skipping revoked certificates, suppressed
+// addresses and anyone emailed in the last day. Email must be configured.
+// Returns how many were sent and skipped, or the first unexpected store error.
+func (s *Server) remindCohort(ctx context.Context, sc store.Scope, course, cohort string) (sent, skipped int, err error) {
+	certs, _, err := s.store.SearchCertificates(ctx, sc, store.CertFilter{Course: course, Cohort: cohort,
+		Status: "active", Claimed: "no"})
+	if err != nil {
+		return 0, 0, err
+	}
+	cl := sc.Client()
+	for _, c := range certs {
+		if c.EmailBlocked {
+			skipped++
+			continue
+		}
+		err := s.store.RemindNow(ctx, sc, c.ID, func(c *store.Certificate, token string) (*store.NewEmail, error) {
+			m, err := emails.Reminder(s.platform(), emails.Client{Name: cl.Name, ReplyTo: cl.ReplyTo, SiteURL: cl.SiteURL},
+				c.Email, c.RecipientName, c.CourseTitle, ClaimURL(c.PublicBase(s.cfg.BaseURL), token))
+			if err != nil {
+				return nil, err
+			}
+			return s.queue.Prepare("reminder", m, "certificate", c.ID)
+		})
+		switch {
+		case err == nil:
+			sent++
+		case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrNotFound):
+			skipped++
+		default:
+			return sent, skipped, err
+		}
+	}
+	if sent > 0 {
+		s.queue.Wake()
+	}
+	return sent, skipped, nil
 }
