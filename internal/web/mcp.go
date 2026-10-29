@@ -253,7 +253,7 @@ func (s *Server) addMCPWriteTools(srv *mcp.Server, r *http.Request, sc store.Sco
 		Description: "Email the student a new claim link for their certificate. The old link stops working. Refused for revoked certificates and bounced addresses."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpCertID) (*mcp.CallToolResult, mcpResendOut, error) {
 			if !s.mailConfigured() {
-				return nil, mcpResendOut{}, errors.New("Email isn't configured on this server.")
+				return nil, mcpResendOut{}, errors.New("email isn't configured on this server")
 			}
 			if err := s.resendClaimLink(ctx, sc, in.ID); err != nil {
 				return nil, mcpResendOut{}, s.mcpError(err)
@@ -265,7 +265,7 @@ func (s *Server) addMCPWriteTools(srv *mcp.Server, r *http.Request, sc store.Sco
 		Description: "Email a reminder to everyone in a cohort who hasn't opened their claim link. Skips revoked certificates, bounced addresses and anyone emailed in the last day."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpCohortInput) (*mcp.CallToolResult, mcpRemindOut, error) {
 			if !s.mailConfigured() {
-				return nil, mcpRemindOut{}, errors.New("Email isn't configured on this server.")
+				return nil, mcpRemindOut{}, errors.New("email isn't configured on this server")
 			}
 			sent, skipped, err := s.remindCohort(ctx, sc, in.Course, in.Cohort)
 			if err != nil {

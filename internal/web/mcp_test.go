@@ -329,7 +329,7 @@ func TestMCPWritesNeedEmail(t *testing.T) {
 		{"resend_claim_link", map[string]any{"id": f.ids[0]}},
 		{"remind_cohort", map[string]any{"course": "java", "cohort": "C1"}},
 	} {
-		if text, isErr := f.call(t, c.tool, c.args, nil); !isErr || !strings.Contains(text, "Email isn't configured") {
+		if text, isErr := f.call(t, c.tool, c.args, nil); !isErr || !strings.Contains(text, "email isn't configured") {
 			t.Fatalf("%s without email: %s", c.tool, text)
 		}
 	}
