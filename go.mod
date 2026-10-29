@@ -3,7 +3,7 @@ module certsforever
 go 1.27.0
 
 require (
-	github.com/mattn/go-sqlite3 v1.14.24
+	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/image v0.47.0
 )
