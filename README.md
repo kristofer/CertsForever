@@ -23,7 +23,7 @@ the [runbook](docs/RUNBOOK.md).
 
 ## Quick start
 
-Requires Go 1.23+ and a C compiler (the SQLite driver uses cgo; on macOS the
+Requires Go 1.27+ and a C compiler (the SQLite driver uses cgo; on macOS the
 Xcode command-line tools are enough).
 
 ```sh
@@ -295,6 +295,44 @@ curl -H "$H" -X POST https://certs.example.org/api/v1/certificates/ZCW-XXXXXXXXX
 Also available: `GET /api/v1/certificates/{id}`, `POST …/{id}/claim-link`,
 `GET`/`POST /api/v1/courses`, and `GET /api/v1/stats`.
 
+## MCP for AI assistants
+
+`/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) endpoint,
+so an assistant such as Claude can answer questions about a client's
+certificates and do a few routine jobs. It uses the same client API tokens,
+so it sees only that client, shares the token's rate limit, and every write
+is audited as `api-token:<name>` with `"via": "mcp"`. It is stateless
+(streamable HTTP, JSON responses).
+
+| Tool | Does |
+|---|---|
+| `overview` | Headline numbers and per-course share and LinkedIn counts |
+| `list_courses`, `list_cohorts` | Courses; cohorts with claimed, public and unclaimed counts |
+| `search_certificates` | Search by course, cohort, name/email/ID, status, claimed (paged, 100 at most) |
+| `cohort_roster` | One cohort, with the latest email status per student |
+| `get_certificate` | One certificate: URL, views, LinkedIn adds and shares, emails, audit history |
+| `preview_issue` | Dry run of a cohort CSV; issues nothing |
+| `correct_name` | Fix the recipient's name; the link doesn't change |
+| `resend_claim_link` | Email a new claim link; the old one stops working |
+| `remind_cohort` | Remind everyone who hasn't opened their link (skips anyone emailed in the last day) |
+
+Issuing and revoking are deliberately not available over MCP; use the
+console or `/api/v1`. Claim links and tokens are never returned.
+
+Connect Claude Code with a token from the client's API page:
+
+```sh
+claude mcp add --transport http laurelposts https://certs.example.org/mcp \
+  --header "Authorization: Bearer cfk_…"
+```
+
+The MCP library refuses (403) a request that reaches the server on a
+loopback address with a non-localhost `Host` header, as DNS-rebinding
+protection. With Docker's default bridge networking that never applies, whether Caddy runs in Compose or
+on the host: proxied requests arrive on the container's own network address.
+It would only bite if the binary ran directly on the host behind a proxy
+forwarding to `127.0.0.1`, or in a container with `network_mode: host`.
+
 ## Layout
 
 ```
@@ -302,7 +340,7 @@ cmd/certsforever/        CLI + server entry point
 internal/config/         env config, validation, *_FILE secrets
 internal/buildinfo/      version stamped at build time
 internal/store/          SQLite: writer/reader pools, checksummed migrations, backup/restore
-internal/web/            handlers, templates, static assets (embedded)
+internal/web/            handlers, templates, static assets (embedded), MCP endpoint (mcp.go)
 internal/ogimage/        1200x627 share image (pure Go, bundled Go fonts), in each certificate's design
 internal/imgnorm/        logo/signature uploads: PNG/JPEG only, size limits, re-encoded to PNG
 internal/linkedin/       Add-to-profile and share URL builders

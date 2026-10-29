@@ -210,6 +210,9 @@ func (s *Server) routes() {
 	m.Handle("POST /api/v1/certificates/{id}/claim-link", s.apiToken(s.handleNewClaimLink))
 	m.Handle("GET /api/v1/stats", s.apiToken(s.handleStats))
 
+	// MCP for AI assistants (Authorization: Bearer cfk_…): see mcp.go.
+	m.Handle("/mcp", s.mcpHandler())
+
 	m.HandleFunc("GET /super", s.super(s.handleSuper))
 	m.HandleFunc("GET /super/clients", s.super(s.handleSuperClients))
 	m.HandleFunc("POST /super/clients", s.super(s.handleSuperCreateClient))

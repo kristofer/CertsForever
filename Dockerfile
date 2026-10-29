@@ -6,7 +6,7 @@
 #
 # The base images are build args so they can be pinned or mirrored
 # (e.g. behind a registry proxy) without editing this file.
-ARG GO_IMAGE=golang:1.26-bookworm
+ARG GO_IMAGE=golang:1.27-bookworm
 ARG RUNTIME_IMAGE=gcr.io/distroless/base-debian12:nonroot
 
 # ---- build -----------------------------------------------------------------
